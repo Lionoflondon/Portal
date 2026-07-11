@@ -24,6 +24,7 @@ import {
   Timestamp,
   updateDoc,
   where,
+  limit,
 } from 'firebase/firestore';
 import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -81,7 +82,7 @@ export function sendPortalPasswordReset(email) {
   return sendPasswordResetEmail(requireService(portalAuth, 'Authentication'), email);
 }
 
-export async function updatePortalProfile(user, { displayName, emailUpdates, bio, location, website, profilePhotoUrl }) {
+export async function updatePortalProfile(user, { displayName, emailUpdates, bio, location, website, pronouns, profilePhotoUrl, bannerUrl }) {
   if (displayName) await updateProfile(user, { displayName });
   await setDoc(doc(requireService(portalDb, 'Firestore'), 'users', user.uid), {
     ...(displayName ? { displayName } : {}),
@@ -89,16 +90,18 @@ export async function updatePortalProfile(user, { displayName, emailUpdates, bio
     ...(bio === undefined ? {} : { bio }),
     ...(location === undefined ? {} : { location }),
     ...(website === undefined ? {} : { website }),
+    ...(pronouns === undefined ? {} : { pronouns }),
     ...(profilePhotoUrl === undefined ? {} : { profilePhotoUrl }),
+    ...(bannerUrl === undefined ? {} : { bannerUrl }),
     updatedAt: serverTimestamp(),
   }, { merge: true });
 }
 
-export function uploadPortalProfilePhoto(user, file, onProgress) {
+export function uploadPortalProfilePhoto(user, file, onProgress, kind = 'profile') {
   if (!file?.type?.startsWith('image/')) throw new Error('Choose an image file for your profile photo.');
   if (file.size > 10 * 1024 * 1024) throw new Error('Profile photos must be 10 MB or smaller.');
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-').slice(-100) || 'photo';
-  const path = `users/${user.uid}/private/profile/${Date.now()}-${safeName}`;
+  const path = `users/${user.uid}/private/${kind}/${Date.now()}-${safeName}`;
   const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, { contentType: file.type });
   return new Promise((resolve, reject) => task.on('state_changed', (snapshot) => onProgress?.(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
     try { resolve(await getDownloadURL(task.snapshot.ref)); } catch (error) { reject(error); }
@@ -350,6 +353,45 @@ export function observePostReplies(postId, callback, onError) {
 
 export function observePortalNotifications(uid, callback, onError) {
   return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'users', uid, 'notifications'), orderBy('createdAt', 'desc')), callback, onError);
+}
+
+export function observePortalConversations(uid, callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'messageConversations'), where('participantUids', 'array-contains', uid), orderBy('lastMessageAt', 'desc')), callback, onError);
+}
+
+export function observePortalMessages(conversationId, callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'messageConversations', conversationId, 'messages'), orderBy('createdAt', 'asc'), limit(80)), callback, onError);
+}
+
+export async function sendPortalMessage(user, conversation, body, media = null) {
+  const db = requireService(portalDb, 'Firestore');
+  const conversationRef = doc(db, 'messageConversations', conversation.id);
+  const messageRef = collection(db, 'messageConversations', conversation.id, 'messages');
+  const text = body.trim();
+  if (!text && !media) throw new Error('Write a message or attach media.');
+  await addDoc(messageRef, {
+    senderUid: user.uid,
+    body: text,
+    media,
+    readBy: [user.uid],
+    createdAt: serverTimestamp(),
+  });
+  await updateDoc(conversationRef, {
+    lastMessage: text || (media?.type?.startsWith('image/') ? 'Photo' : 'Video'),
+    lastMessageAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export function uploadPortalMessageMedia(user, conversationId, file, onProgress) {
+  if (!file?.type?.startsWith('image/') && !file?.type?.startsWith('video/')) throw new Error('Messages support photos and videos.');
+  if (file.size > 50 * 1024 * 1024) throw new Error('Message media must be 50 MB or smaller.');
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-').slice(-100) || 'media';
+  const path = `messages/${conversationId}/${user.uid}/${Date.now()}-${safeName}`;
+  const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, { contentType: file.type });
+  return new Promise((resolve, reject) => task.on('state_changed', (snapshot) => onProgress?.(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
+    try { resolve({ url: await getDownloadURL(task.snapshot.ref), type: file.type, path }); } catch (error) { reject(error); }
+  }));
 }
 
 export function observeIngestionProviders(callback, onError) {

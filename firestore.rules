@@ -24,7 +24,7 @@ service cloud.firestore {
       allow read, delete: if isOwner(uid);
       allow update: if isOwner(uid)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['displayName', 'preferences', 'profilePhotoUrl', 'bio', 'location', 'website', 'updatedAt']);
+          .hasOnly(['displayName', 'preferences', 'profilePhotoUrl', 'bannerUrl', 'bio', 'location', 'website', 'pronouns', 'updatedAt']);
 
       match /vortex/{privateDocument=**} {
         allow read, write: if isOwner(uid);
@@ -183,6 +183,24 @@ service cloud.firestore {
     match /postReplies/{replyId} {
       allow read: if signedIn() && resource.data.visibility == 'public';
       allow write: if false;
+    }
+
+    match /messageConversations/{conversationId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.participantUids;
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.participantUids
+        && request.resource.data.participantUids == resource.data.participantUids
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'updatedAt']);
+      allow create, delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/messageConversations/$(conversationId)).data.participantUids;
+        allow create: if signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/messageConversations/$(conversationId)).data.participantUids
+          && request.resource.data.senderUid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['senderUid', 'body', 'media', 'readBy', 'createdAt']);
+        allow update, delete: if false;
+      }
     }
 
     match /quoteEchoes/{quoteEchoId} {

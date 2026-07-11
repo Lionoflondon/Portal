@@ -111,4 +111,25 @@ describe('Portal app shell', () => {
     expect(detailBlock).toContain('Opened at');
     expect(detailBlock).toContain('Reply to this Post');
   });
+
+  it('uses a floating Echo popover instead of expanding under the Post', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const postCardBlock = source.match(/function PostCard\([\s\S]*?\n}\n\nfunction Home/)?.[0] || '';
+    expect(postCardBlock).toContain('floating-popover');
+    expect(postCardBlock).toContain('popover-dismiss');
+    expect(postCardBlock).toContain("event.key === 'Escape'");
+  });
+
+  it('adds full Profile editing, modern notifications, real messages and People search', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    expect(source).toContain('function ProfileEditModal');
+    expect(source).toContain('Profile photo');
+    expect(source).toContain('Banner');
+    expect(source).toContain('Pronouns');
+    expect(source).toContain('notification-card modern');
+    expect(source).toContain('function Messages');
+    expect(source).toContain('observePortalConversations');
+    expect(source).toContain('People');
+    expect(source).toContain('searchPortalProfiles');
+  });
 });
