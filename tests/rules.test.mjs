@@ -105,4 +105,16 @@ describe('Portal Firebase rules', () => {
     await assertFails(setDoc(doc(jason.firestore(), 'handleRequests/request-1'), { riskScore: 0, approvalState: 'approved', issuanceState: 'issued' }, { merge: true }));
     await assertFails(setDoc(doc(jason.firestore(), 'handleRiskSignals/device-1'), { kind: 'device', signature: 'abc', uid: 'jason-risk' }));
   });
+
+  it('keeps handle purchase records owner-readable and server-authoritative', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'handlePurchases/purchase-1'), { uid: 'jason-purchase', normalizedHandle: 'nebula', status: 'assigned', developmentPaid: true, paymentStatus: 'approved', issuanceState: 'issued', createdAt: new Date() });
+    });
+    const jason = testEnv.authenticatedContext('jason-purchase');
+    const maya = testEnv.authenticatedContext('maya-purchase');
+    await assertSucceeds(getDoc(doc(jason.firestore(), 'handlePurchases/purchase-1')));
+    await assertFails(getDoc(doc(maya.firestore(), 'handlePurchases/purchase-1')));
+    await assertFails(setDoc(doc(jason.firestore(), 'handlePurchases/purchase-2'), { uid: 'jason-purchase', developmentPaid: true, paymentStatus: 'approved', issuanceState: 'issued' }));
+    await assertFails(updateDoc(doc(jason.firestore(), 'handlePurchases/purchase-1'), { paymentStatus: 'approved', issuanceState: 'issued' }));
+  });
 });

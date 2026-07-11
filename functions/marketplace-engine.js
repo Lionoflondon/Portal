@@ -1,5 +1,81 @@
 export const thirdPartyHandleSalesEnabled = false;
 export const PORTAL_COMMISSION_BPS = 1000;
+export const activePaymentProvider = 'placeholder';
+
+export const HANDLE_PRICING = {
+  standard: { category: 'Standard', amountMinor: 500, currency: 'GBP', periodMonths: 12, renewalAmountMinor: 500, description: 'A standard Portal identity.' },
+  premium: { category: 'Premium', amountMinor: null, currency: 'GBP', periodMonths: 12, renewalAmountMinor: null, description: 'A premium Portal identity with custom pricing.' },
+  business: { category: 'Business', amountMinor: 2000, currency: 'GBP', periodMonths: 12, renewalAmountMinor: 2000, description: 'A business Portal identity.' },
+  creator: { category: 'Creator', amountMinor: 500, currency: 'GBP', periodMonths: 12, renewalAmountMinor: 500, description: 'A creator Portal identity.' },
+  legacy: { category: 'Legacy', amountMinor: null, currency: 'GBP', periodMonths: 0, renewalAmountMinor: null, description: 'A legacy identity that is not publicly available.' },
+  protected: { category: 'Protected', amountMinor: null, currency: 'GBP', periodMonths: 0, renewalAmountMinor: null, description: 'A protected identity that is not publicly available.' },
+};
+
+const PREMIUM_WORDS = new Set(['ai', 'app', 'bank', 'business', 'creator', 'crypto', 'finance', 'football', 'game', 'gold', 'health', 'home', 'jobs', 'king', 'london', 'media', 'music', 'news', 'shop', 'sport', 'tech', 'travel', 'video']);
+
+export function classifyHandleForPurchase(handle = '', registry = {}, listing = null) {
+  if (registry.status === 'protected' || registry.marketplaceClass === 'protected') return 'protected';
+  if (registry.marketplaceClass === 'legacy_company' || registry.category === 'legacy_company') return 'legacy';
+  if (listing) return 'marketplace';
+  const normalized = String(handle || registry.normalizedHandle || '').toLowerCase();
+  if (registry.marketplaceClass === 'business') return 'business';
+  if (registry.marketplaceClass === 'creator') return 'creator';
+  if (registry.marketplaceClass === 'premium' || PREMIUM_WORDS.has(normalized) || normalized.length <= 3) return 'premium';
+  return 'standard';
+}
+
+export function pricingForHandle(handle = '', registry = {}, listing = null) {
+  if (listing) {
+    return {
+      category: 'Marketplace listing',
+      amountMinor: listing.askingPriceAmount,
+      renewalAmountMinor: null,
+      currency: listing.currency || 'GBP',
+      periodMonths: 0,
+      description: 'Seller-priced marketplace listing.',
+      customPrice: false,
+    };
+  }
+  const type = classifyHandleForPurchase(handle, registry, listing);
+  const base = HANDLE_PRICING[type] || HANDLE_PRICING.standard;
+  const configuredAmount = registry.customPriceAmountMinor ?? registry.priceAmountMinor ?? registry.askingPriceAmount;
+  if (type === 'premium' && Number.isSafeInteger(configuredAmount) && configuredAmount > 0) {
+    return {
+      ...base,
+      type,
+      amountMinor: configuredAmount,
+      renewalAmountMinor: Number.isSafeInteger(registry.renewalAmountMinor) ? registry.renewalAmountMinor : configuredAmount,
+      description: registry.description || base.description,
+      customPrice: false,
+    };
+  }
+  return { ...base, type, customPrice: base.amountMinor == null };
+}
+
+export function marketplaceStateForHandle(registry = {}, listing = null) {
+  if (registry.status === 'available') return 'Available';
+  if (registry.status === 'reserved') return 'Reserved';
+  if (registry.status === 'protected' || registry.saleEligible === false) return 'Protected';
+  if (registry.status === 'marketplace' || listing) return listing ? 'Owned' : 'Premium';
+  if (registry.ownerUid || registry.uid) return 'Owned';
+  if (registry.marketplaceClass === 'premium') return 'Premium';
+  if (registry.marketplaceClass === 'coming_soon') return 'Coming Soon';
+  return 'Available';
+}
+
+export const PlaceholderPaymentProvider = {
+  providerId: 'placeholder',
+  developmentMode: true,
+  async startPurchase({ orderId, amountMinor, currency }) {
+    return { provider: 'placeholder', orderId, status: 'started', amountMinor, currency };
+  },
+  async confirmPurchase({ orderId }) {
+    return { provider: 'placeholder', orderId, approved: true, token: `dev_${orderId}` };
+  },
+  async completePurchase({ orderId, token }) {
+    return { provider: 'placeholder', orderId, confirmed: Boolean(token), token };
+  },
+};
 
 export function calculateCommission(grossAmountMinor) {
   if (!Number.isSafeInteger(grossAmountMinor) || grossAmountMinor <= 0) throw new Error('Sale amount must be a positive integer in minor units.');

@@ -34,4 +34,22 @@ describe('Portal app shell', () => {
     expect(eventsBlock).toContain('Happening around the world');
     expect(eventsBlock).toContain('Events happening now');
   });
+
+  it('keeps handle purchasing inside Marketplace with development payment copy', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const marketplaceBlock = source.match(/function HandleMarketplace\([\s\S]*?\n}\n\nfunction AdminHandleRegistry/)?.[0] || '';
+    expect(marketplaceBlock).toContain('Reserve, discover and trade eligible Portal identities.');
+    expect(marketplaceBlock).toContain('Development Payment Mode');
+    expect(marketplaceBlock).toContain('Temporary Development Mode');
+    expect(marketplaceBlock).toContain('Placeholder payment approved.');
+    expect(marketplaceBlock).not.toContain('Stripe');
+  });
+
+  it('uses Profile as a handle summary instead of a second marketplace', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const profileBlock = source.match(/function PersonalProfile\([\s\S]*?\n}\n\nfunction FeaturePage/)?.[0] || '';
+    expect(profileBlock).toContain('Section title="Handles"');
+    expect(profileBlock).toContain('#/marketplace?handle=');
+    expect(profileBlock).not.toContain('Search handles');
+  });
 });

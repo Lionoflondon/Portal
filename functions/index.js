@@ -12,7 +12,7 @@ import { registryDecision, requiresElevatedReclaim } from './handle-registry.js'
 import { validateReclaimRequest } from './reclaim-policy.js';
 import { canAutoIssueFreeHandle, evaluateHandleRisk } from './handle-risk-engine.js';
 import { echoKey, echoNotificationId, isEchoablePost, nextEchoCount } from './echo-engine.js';
-import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
+import { PlaceholderPaymentProvider, activePaymentProvider, calculateCommission, marketplacePaymentProvider, marketplaceStateForHandle, mayBeginCheckout, mayListHandle, mayTransfer, pricingForHandle, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
 import { confidenceFromSignals, dedupeDecision, initialStatusForCandidate, isMeaningfulEventChange, normaliseCandidate, shouldPublishCandidate, timelineEntryId } from './global-events-engine.js';
 
 initializeApp();
@@ -801,11 +801,26 @@ export const getAdminHandleRecord = onCall(async (request) => {
   requirePortalAdmin(request);
   const normalizedHandle = normalizeHandle(request.data?.handle || '');
   if (!normalizedHandle) throw new HttpsError('invalid-argument', 'Enter a handle to search.');
-  const [handle, reserved, protectedHandle, policy, listings, requests] = await Promise.all([
+  const [handle, reserved, protectedHandle, policy, listings, requests, purchases] = await Promise.all([
     db.collection('handles').doc(normalizedHandle).get(), db.collection('reservedHandles').doc(normalizedHandle).get(), db.collection('protectedHandles').doc(normalizedHandle).get(), db.collection('handlePolicies').doc(normalizedHandle).get(), db.collection('handleListings').doc(normalizedHandle).get(),
     db.collection('handleRequests').where('normalizedHandle', '==', normalizedHandle).orderBy('createdAt', 'desc').limit(10).get(),
+    db.collection('handlePurchases').where('normalizedHandle', '==', normalizedHandle).orderBy('createdAt', 'desc').limit(10).get(),
   ]);
-  return { normalizedHandle, handle: handle.exists ? handle.data() : null, reserved: reserved.exists ? reserved.data() : null, protected: protectedHandle.exists ? protectedHandle.data() : null, policy: policy.exists ? policy.data() : null, listing: listings.exists ? listings.data() : null, requests: requests.docs.map((item) => ({ id: item.id, ...item.data() })) };
+  return { normalizedHandle, handle: handle.exists ? handle.data() : null, reserved: reserved.exists ? reserved.data() : null, protected: protectedHandle.exists ? protectedHandle.data() : null, policy: policy.exists ? policy.data() : null, listing: listings.exists ? listings.data() : null, requests: requests.docs.map((item) => ({ id: item.id, ...item.data() })), purchases: purchases.docs.map((item) => ({ id: item.id, ...item.data(), temporaryPaymentToken: item.data().temporaryPaymentToken ? 'redacted' : null })) };
+});
+
+export const refundPlaceholderHandlePurchase = onCall(async (request) => {
+  const adminUid = requirePortalAdmin(request);
+  const purchaseId = String(request.data?.purchaseId || '');
+  if (!purchaseId) throw new HttpsError('invalid-argument', 'Choose a purchase to refund.');
+  const purchaseRef = db.collection('handlePurchases').doc(purchaseId);
+  const snapshot = await purchaseRef.get();
+  if (!snapshot.exists) throw new HttpsError('not-found', 'Purchase not found.');
+  const purchase = snapshot.data();
+  if (purchase.paymentProviderMode !== 'placeholder') throw new HttpsError('failed-precondition', 'Only placeholder purchases can be refunded here.');
+  await purchaseRef.set({ status: 'refunded', paymentStatus: 'refunded', refundStatus: 'refunded', refundedAt: FieldValue.serverTimestamp(), refundedByUid: adminUid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ system: 'portal_handle_marketplace', action: 'placeholder_purchase_refunded', actorUid: adminUid, purchaseId, normalizedHandle: purchase.normalizedHandle, createdAt: FieldValue.serverTimestamp() });
+  return { purchaseId, status: 'refunded' };
 });
 
 export const requestPaidHandleReview = onCall(async (request) => {
@@ -991,7 +1006,94 @@ export const searchHandleMarketplace = onCall(async (request) => {
   const registry = await db.collection('handles').doc(handle).get();
   const [protectedHandle, reservedHandle, policy] = await Promise.all([db.collection('protectedHandles').doc(handle).get(), db.collection('reservedHandles').doc(handle).get(), db.collection('handlePolicies').doc(handle).get()]);
   const registryRecord = protectedHandle.exists ? protectedHandle.data() : reservedHandle.exists ? reservedHandle.data() : policy.exists ? policy.data() : null;
-  return { handle: registry.exists ? registry.data() : registryRecord ? { ...registryRecord, normalizedHandle: handle, saleEligible: registryRecord.marketplaceEligible === true, marketplaceClass: registryRecord.category || 'protected' } : { normalizedHandle: handle, status: 'available', marketplaceClass: 'available', saleEligible: true }, listing: listing.exists ? listing.data() : null };
+  const handleRecord = registry.exists ? registry.data() : registryRecord ? { ...registryRecord, normalizedHandle: handle, saleEligible: registryRecord.marketplaceEligible === true, marketplaceClass: registryRecord.category || 'protected' } : { normalizedHandle: handle, status: 'available', marketplaceClass: 'available', saleEligible: true };
+  const listingRecord = listing.exists ? listing.data() : null;
+  const state = marketplaceStateForHandle(handleRecord, listingRecord);
+  const pricing = pricingForHandle(handle, handleRecord, listingRecord);
+  return {
+    handle: handleRecord,
+    listing: listingRecord,
+    state,
+    pricing,
+    details: {
+      normalizedHandle: handle,
+      displayHandle: `@${handle}`,
+      availability: state,
+      category: pricing.category,
+      description: pricing.description,
+      registrationPeriodMonths: pricing.periodMonths,
+      renewalPriceMinor: pricing.renewalAmountMinor,
+      currency: pricing.currency,
+      transferEligibility: handleRecord.transferable === false || state === 'Protected' || state === 'Reserved' ? 'Not transferable' : 'Eligible after review',
+      verificationRequired: handleRecord.verificationRequired === true || pricing.type === 'business' || pricing.type === 'premium',
+      ownerHidden: !listingRecord,
+      developmentPaymentMode: activePaymentProvider === 'placeholder',
+    },
+  };
+});
+
+export const startHandlePurchase = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const handle = normalizeHandle(request.data?.handle || '');
+  if (!handle) throw new HttpsError('invalid-argument', 'Choose a handle.');
+  const [handleSnapshot, protectedHandle, reservedHandle, policy, listingSnapshot] = await Promise.all([
+    db.collection('handles').doc(handle).get(),
+    db.collection('protectedHandles').doc(handle).get(),
+    db.collection('reservedHandles').doc(handle).get(),
+    db.collection('handlePolicies').doc(handle).get(),
+    db.collection('handleListings').doc(handle).get(),
+  ]);
+  const registryRecord = protectedHandle.exists ? protectedHandle.data() : reservedHandle.exists ? reservedHandle.data() : policy.exists ? policy.data() : null;
+  const handleRecord = handleSnapshot.exists ? handleSnapshot.data() : registryRecord ? { ...registryRecord, normalizedHandle: handle, saleEligible: registryRecord.marketplaceEligible === true, marketplaceClass: registryRecord.category || 'protected' } : { normalizedHandle: handle, status: 'available', marketplaceClass: 'available', saleEligible: true };
+  const listing = listingSnapshot.exists ? listingSnapshot.data() : null;
+  const state = marketplaceStateForHandle(handleRecord, listing);
+  const pricing = pricingForHandle(handle, handleRecord, listing);
+  if (['Protected', 'Reserved', 'Unavailable', 'Coming Soon'].includes(state) || pricing.amountMinor == null) throw new HttpsError('failed-precondition', 'This handle is not available for placeholder purchase.');
+  if (listing) throw new HttpsError('failed-precondition', 'Marketplace listings require the approved settlement provider before checkout.');
+  if (handleRecord.ownerUid || handleRecord.uid) throw new HttpsError('already-exists', 'That handle is already owned.');
+  const purchaseRef = db.collection('handlePurchases').doc();
+  const providerSession = await PlaceholderPaymentProvider.startPurchase({ orderId: purchaseRef.id, amountMinor: pricing.amountMinor, currency: pricing.currency });
+  await purchaseRef.set({ purchaseId: purchaseRef.id, uid, normalizedHandle: handle, displayHandle: `@${handle}`, status: 'review', step: 'review', amountMinor: pricing.amountMinor, renewalAmountMinor: pricing.renewalAmountMinor, currency: pricing.currency, registrationPeriodMonths: pricing.periodMonths, renewalDate: new Date(Date.now() + pricing.periodMonths * 30 * 24 * 60 * 60 * 1000), provider: providerSession.provider, paymentProviderMode: 'placeholder', developmentPaid: false, paymentStatus: 'not_started', issuanceState: 'not_issued', handleType: pricing.category, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  await db.collection('auditLogs').add({ system: 'portal_handle_marketplace', action: 'purchase_started', actorUid: uid, purchaseId: purchaseRef.id, normalizedHandle: handle, provider: providerSession.provider, createdAt: FieldValue.serverTimestamp() });
+  return { purchaseId: purchaseRef.id, provider: providerSession.provider, developmentMode: true, handle, pricing, status: 'review' };
+});
+
+export const confirmHandlePurchase = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const purchaseId = String(request.data?.purchaseId || '');
+  if (!purchaseId) throw new HttpsError('invalid-argument', 'Missing purchase.');
+  const purchaseRef = db.collection('handlePurchases').doc(purchaseId);
+  const snapshot = await purchaseRef.get();
+  if (!snapshot.exists || snapshot.data().uid !== uid) throw new HttpsError('not-found', 'Purchase not found.');
+  const confirmation = await PlaceholderPaymentProvider.confirmPurchase({ orderId: purchaseId });
+  await purchaseRef.set({ status: 'payment_approved', step: 'confirmation', developmentPaid: true, paymentStatus: 'approved', temporaryPaymentToken: confirmation.token, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await db.collection('auditLogs').add({ system: 'portal_handle_marketplace', action: 'placeholder_payment_approved', actorUid: uid, purchaseId, createdAt: FieldValue.serverTimestamp() });
+  return { purchaseId, message: 'Placeholder payment approved.', temporaryPaymentToken: confirmation.token };
+});
+
+export const completeHandlePurchase = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const purchaseId = String(request.data?.purchaseId || '');
+  const purchaseRef = db.collection('handlePurchases').doc(purchaseId);
+  let result;
+  await db.runTransaction(async (transaction) => {
+    const purchaseSnapshot = await transaction.get(purchaseRef);
+    if (!purchaseSnapshot.exists || purchaseSnapshot.data().uid !== uid) throw new HttpsError('not-found', 'Purchase not found.');
+    const purchase = purchaseSnapshot.data();
+    if (purchase.status === 'assigned') { result = purchase; return; }
+    if (purchase.developmentPaid !== true || !purchase.temporaryPaymentToken) throw new HttpsError('failed-precondition', 'Complete placeholder payment first.');
+    const handleRef = db.collection('handles').doc(purchase.normalizedHandle);
+    const handleSnapshot = await transaction.get(handleRef);
+    const ownerUid = handleSnapshot.data()?.ownerUid || handleSnapshot.data()?.uid || null;
+    if (ownerUid && ownerUid !== uid) throw new HttpsError('already-exists', 'That handle was just taken.');
+    transaction.set(handleRef, { uid, ownerUid: uid, normalizedHandle: purchase.normalizedHandle, originalHandle: purchase.normalizedHandle, status: 'active', marketplaceClass: purchase.handleType.toLowerCase(), handleType: purchase.handleType, freeHandle: false, saleEligible: true, verificationState: 'unverified', reservedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.set(db.collection('handleTransfers').doc(), { type: 'placeholder_purchase_assignment', purchaseId, normalizedHandle: purchase.normalizedHandle, buyerUid: uid, createdAt: FieldValue.serverTimestamp() });
+    transaction.set(purchaseRef, { status: 'assigned', step: 'success', issuanceState: 'issued', assignedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    result = { ...purchase, status: 'assigned' };
+  });
+  const completion = await PlaceholderPaymentProvider.completePurchase({ orderId: purchaseId, token: result.temporaryPaymentToken });
+  await db.collection('auditLogs').add({ system: 'portal_handle_marketplace', action: 'handle_purchase_completed', actorUid: uid, purchaseId, normalizedHandle: result.normalizedHandle, provider: completion.provider, createdAt: FieldValue.serverTimestamp() });
+  return { purchaseId, status: 'assigned', handle: result.normalizedHandle, renewalDate: result.renewalDate, registrationPeriodMonths: result.registrationPeriodMonths };
 });
 
 export const createHandleListing = onCall(async (request) => {

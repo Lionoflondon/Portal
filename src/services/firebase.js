@@ -333,6 +333,9 @@ export function changePortalHandle(handle) { return callPortalIdentity('changeHa
 export function resolvePortalHandle(handle) { return callPortalIdentity('resolveHandle', { handle }); }
 export function searchPortalProfiles(term) { return callPortalIdentity('searchPortalProfiles', { term }); }
 export function searchPortalHandleMarketplace(handle) { return callPortalIdentity('searchHandleMarketplace', { handle }); }
+export function startPortalHandlePurchase(handle) { return callPortalIdentity('startHandlePurchase', { handle }); }
+export function confirmPortalHandlePurchase(purchaseId) { return callPortalIdentity('confirmHandlePurchase', { purchaseId }); }
+export function completePortalHandlePurchase(purchaseId) { return callPortalIdentity('completeHandlePurchase', { purchaseId }); }
 export function createPortalHandleListing(handle, askingPriceAmount, currency = 'GBP') { return callPortalIdentity('createHandleListing', { handle, askingPriceAmount, currency }); }
 export function submitPortalHandleOffer(listingId, offerAmount) { return callPortalIdentity('submitHandleOffer', { listingId, offerAmount }); }
 export function openPortalHandleDispute(listingId) { return callPortalIdentity('openHandleDispute', { listingId }); }
@@ -345,5 +348,14 @@ export function submitPortalEventContribution(eventId, type, body, extra = {}) {
 export function getPortalAdminHandle(handle) { return callPortalIdentity('getAdminHandleRecord', { handle }); }
 export function managePortalHandleRegistry(payload) { return callPortalIdentity('managePortalHandleRegistry', payload); }
 export function reclaimPortalHandle(payload) { return callPortalIdentity('reclaimPortalHandle', payload); }
+export function refundPlaceholderPortalHandlePurchase(purchaseId) { return callPortalIdentity('refundPlaceholderHandlePurchase', { purchaseId }); }
 export function requestPaidPortalHandleReview(handle, paymentReference, riskSignals = {}) { return callPortalIdentity('requestPaidHandleReview', { handle, paymentReference, riskSignals }); }
 export function reviewPortalHandleRequest(payload) { return callPortalIdentity('reviewHandleRequest', payload); }
+
+export function observeHandlePurchases(uid, callback, onError) {
+  return onSnapshot(
+    query(collection(requireService(portalDb, 'Firestore'), 'handlePurchases'), where('uid', '==', uid), orderBy('createdAt', 'desc')),
+    callback,
+    onError,
+  );
+}
