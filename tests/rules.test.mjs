@@ -80,4 +80,17 @@ describe('Portal Firebase rules', () => {
     await assertSucceeds(updateDoc(doc(jason.firestore(), 'users/jason-notify/notifications/echo-1'), { read: true, updatedAt: new Date() }));
     await assertFails(updateDoc(doc(jason.firestore(), 'users/jason-notify/notifications/echo-1'), { postId: 'post-2' }));
   });
+
+  it('keeps Global Event Engine records server-authoritative', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'eventTimeline/entry-1'), { eventId: 'event-1', entryType: 'event_detected', eventTimestamp: new Date(), ingestionTimestamp: new Date(), moderationState: 'approved' });
+      await setDoc(doc(context.firestore(), 'eventSources/source-1'), { eventId: 'event-1', provider: 'official' });
+    });
+    const jason = testEnv.authenticatedContext('jason-global-events');
+    await assertSucceeds(getDoc(doc(jason.firestore(), 'eventTimeline/entry-1')));
+    await assertSucceeds(getDoc(doc(jason.firestore(), 'eventSources/source-1')));
+    await assertFails(setDoc(doc(jason.firestore(), 'eventTimeline/client-entry'), { eventId: 'event-1', entryType: 'status_change' }));
+    await assertFails(setDoc(doc(jason.firestore(), 'eventCandidates/client-candidate'), { title: 'Fake candidate' }));
+    await assertFails(setDoc(doc(jason.firestore(), 'ingestionProviders/client-provider'), { enabled: true }));
+  });
 });

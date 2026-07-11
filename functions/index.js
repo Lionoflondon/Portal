@@ -1,7 +1,9 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { Buffer } from 'node:buffer';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { logger } from 'firebase-functions';
 import { entryIdFor, isEligibleForVortex, makeEntry, preferredEntryType } from './entry-engine.js';
@@ -10,6 +12,7 @@ import { registryDecision, requiresElevatedReclaim } from './handle-registry.js'
 import { validateReclaimRequest } from './reclaim-policy.js';
 import { echoKey, echoNotificationId, isEchoablePost, nextEchoCount } from './echo-engine.js';
 import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
+import { confidenceFromSignals, dedupeDecision, initialStatusForCandidate, isMeaningfulEventChange, normaliseCandidate, timelineEntryId } from './global-events-engine.js';
 
 initializeApp();
 setGlobalOptions({ region: 'europe-west2' });
@@ -17,12 +20,17 @@ const db = getFirestore();
 
 async function countEventActivity(eventId) {
   const reports = await db.collection('events').doc(eventId).collection('reports').get();
+  const sources = await db.collection('eventSources').where('eventId', '==', eventId).get();
+  const contributions = await db.collection('eventContributions').where('eventId', '==', eventId).get();
   const eligibleReports = reports.docs.map((item) => item.data()).filter(isEligibleForVortex);
+  const sourceDocs = sources.docs.map((item) => item.data());
+  const contributionDocs = contributions.docs.map((item) => item.data()).filter(isEligibleForVortex);
   const followers = await db.collectionGroup('vortex').where('eventId', '==', eventId).count().get();
   return {
-    contributionCount: eligibleReports.length,
+    contributionCount: eligibleReports.length + contributionDocs.length,
     reportCount: eligibleReports.length,
-    sourceCount: new Set(eligibleReports.map((item) => item.sourceType).filter(Boolean)).size,
+    sourceCount: sourceDocs.length || new Set(eligibleReports.map((item) => item.sourceType).filter(Boolean)).size,
+    officialSourceCount: sourceDocs.filter((item) => item.sourceTrust?.tier === 'official').length,
     followerCount: followers.data().count,
   };
 }
@@ -38,6 +46,43 @@ async function projectEvent(eventId, event) {
   const entry = makeEntry({ type: 'Event', sourceId: eventId, source: event, counts, parentSignalId: event.parentSignalId || null });
   await eventRef.set({ ...entry, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   if (event.parentSignalId) await removeEntry('Signal', event.parentSignalId);
+}
+
+async function recalculateEvent(eventId, change = { type: 'source_refreshed' }) {
+  const eventRef = db.collection('events').doc(eventId);
+  const eventSnapshot = await eventRef.get();
+  if (!eventSnapshot.exists) return null;
+  const counts = await countEventActivity(eventId);
+  const confidenceLabel = confidenceFromSignals(counts);
+  await eventRef.set({
+    sourceCount: counts.sourceCount,
+    officialSourceCount: counts.officialSourceCount,
+    contributorCount: counts.contributionCount,
+    evidenceCount: counts.reportCount,
+    confidenceLabel,
+    lastMeaningfulUpdateAt: isMeaningfulEventChange(change) ? FieldValue.serverTimestamp() : eventSnapshot.data().lastMeaningfulUpdateAt || FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await db.collection('auditLogs').add({ entityType: 'event', entityId: eventId, changeType: change.type, createdAt: FieldValue.serverTimestamp(), summary: change.summary || null });
+  if (isMeaningfulEventChange(change)) await notifyEventFollowers(eventId, change);
+  return { eventId, ...counts, confidenceLabel };
+}
+
+async function notifyEventFollowers(eventId, change) {
+  const followers = await db.collectionGroup('vortex').where('eventId', '==', eventId).get();
+  const notificationId = `event_${eventId}_${change.type}_${change.dedupeKey || 'latest'}`;
+  await Promise.all(followers.docs.map((follow) => {
+    const userId = follow.ref.parent.parent.id;
+    if (follow.data().muted === true) return null;
+    return db.collection('users').doc(userId).collection('notifications').doc(notificationId).set({
+      type: 'event_update',
+      eventId,
+      changeType: change.type,
+      summary: change.summary || 'An Event you follow changed meaningfully.',
+      read: false,
+      createdAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }).filter(Boolean));
 }
 
 async function projectSignal(signalId, signal) {
@@ -146,6 +191,234 @@ export const deletePortalQuoteEcho = onCall(async (request) => {
   const uid = requireAuth(request); const quoteRef = db.collection('quoteEchoes').doc(String(request.data?.quoteEchoId || ''));
   await db.runTransaction(async (transaction) => { const snapshot = await transaction.get(quoteRef); if (!snapshot.exists) throw new HttpsError('not-found', 'Quote Echo not found.'); if (snapshot.data().quoteAuthorUid !== uid) throw new HttpsError('permission-denied', 'Only the Quote Echo author can delete it.'); transaction.update(quoteRef, { visibility: 'deleted', deletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }); });
   return { deleted: true };
+});
+
+function escapeXml(value = '') {
+  return String(value).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+
+function xmlTag(item, tag) {
+  const match = item.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return match ? escapeXml(match[1].replace(/<!\\[CDATA\\[|\\]\\]>/g, '').trim()) : '';
+}
+
+async function fetchProviderCandidates(provider) {
+  if (!provider.enabled) return [];
+  if (!provider.url) return [];
+  if (provider.kind === 'official-json') {
+    const response = await fetch(provider.url);
+    if (!response.ok) throw new Error(`Provider ${provider.id} returned ${response.status}`);
+    const payload = await response.json();
+    const items = Array.isArray(payload) ? payload : payload.items || payload.events || [];
+    return items.slice(0, provider.maxItems || 20).map((item) => normaliseCandidate({
+      provider: provider.id,
+      providerItemId: item.id || item.guid || item.url || item.link,
+      title: item.title || item.headline,
+      summary: item.summary || item.description,
+      sourceUrl: item.url || item.link,
+      publishedAt: item.publishedAt || item.pubDate || item.date,
+      updatedAt: item.updatedAt,
+      locationText: item.location || item.locationText || provider.defaultLocation,
+      coordinates: item.coordinates || null,
+      category: item.category || provider.defaultCategory || 'World',
+      sourceTrust: provider.sourceTrust || { tier: 'official', reputation: 'high' },
+    }));
+  }
+  if (provider.kind === 'rss' || provider.kind === 'atom') {
+    const response = await fetch(provider.url);
+    if (!response.ok) throw new Error(`Provider ${provider.id} returned ${response.status}`);
+    const xml = await response.text();
+    const items = [...xml.matchAll(new RegExp('<item[\\\\s\\\\S]*?</item>|<entry[\\\\s\\\\S]*?</entry>', 'gi'))].map((match) => match[0]);
+    return items.slice(0, provider.maxItems || 20).map((item) => {
+      const link = xmlTag(item, 'link') || item.match(/<link[^>]+href=["']([^"']+)["']/i)?.[1] || '';
+      return normaliseCandidate({
+        provider: provider.id,
+        providerItemId: xmlTag(item, 'guid') || xmlTag(item, 'id') || link || xmlTag(item, 'title'),
+        title: xmlTag(item, 'title'),
+        summary: xmlTag(item, 'description') || xmlTag(item, 'summary'),
+        sourceUrl: link,
+        publishedAt: xmlTag(item, 'pubDate') || xmlTag(item, 'published') || xmlTag(item, 'updated'),
+        updatedAt: xmlTag(item, 'updated'),
+        locationText: provider.defaultLocation || '',
+        category: provider.defaultCategory || 'World',
+        sourceTrust: provider.sourceTrust || { tier: 'publisher', reputation: 'standard' },
+      });
+    });
+  }
+  throw new Error(`Unsupported provider kind: ${provider.kind}`);
+}
+
+async function upsertCandidate(candidate, provider) {
+  const candidateId = `${candidate.provider}_${Buffer.from(candidate.providerItemId).toString('base64url').slice(0, 80)}`;
+  const candidateRef = db.collection('eventCandidates').doc(candidateId);
+  const existingCandidate = await candidateRef.get();
+  if (existingCandidate.exists && existingCandidate.data().eventId) return { action: 'already_attached', eventId: existingCandidate.data().eventId };
+  const windowStart = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+  const nearbyEvents = await db.collection('events').where('archived', '==', false).where('updatedAt', '>=', windowStart).limit(50).get();
+  const decision = dedupeDecision(candidate, nearbyEvents.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+  await candidateRef.set({ ...candidate, providerConfigId: provider.id, decision: decision.action, eventId: decision.eventId || null, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  if (decision.action === 'review') {
+    await db.collection('eventMergeReviews').doc(candidateId).set({ candidateId, possibleEventId: decision.eventId, status: 'pending_custodian_review', reason: 'possible_duplicate', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    return decision;
+  }
+  const eventRef = decision.action === 'attach' ? db.collection('events').doc(decision.eventId) : db.collection('events').doc();
+  await db.runTransaction(async (transaction) => {
+    const eventSnapshot = await transaction.get(eventRef);
+    const now = FieldValue.serverTimestamp();
+    if (!eventSnapshot.exists) {
+      transaction.set(eventRef, {
+        title: candidate.title,
+        summary: candidate.summary,
+        status: initialStatusForCandidate(candidate),
+        category: candidate.category || 'World',
+        startTime: candidate.publishedAt ? new Date(candidate.publishedAt) : now,
+        lastMeaningfulUpdateAt: now,
+        primaryLocation: candidate.locationText || null,
+        locationSummary: candidate.locationText || null,
+        geographicScope: provider.geographicScope || 'World',
+        coordinates: candidate.coordinates || null,
+        country: provider.country || null,
+        region: provider.region || null,
+        sourceCount: 0,
+        contributorCount: 0,
+        evidenceCount: 0,
+        officialSourceCount: 0,
+        confidenceLabel: 'Emerging',
+        duplicateEventIds: [],
+        relatedEventIds: [],
+        visibility: 'public',
+        archived: false,
+        moderationState: 'approved',
+        createdByType: 'external_ingestion',
+        createdBy: 'external_ingestion',
+        authorUid: null,
+        publishedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else {
+      transaction.set(eventRef, { updatedAt: now }, { merge: true });
+    }
+    transaction.set(candidateRef, { eventId: eventRef.id, decision: eventSnapshot.exists ? 'attach' : 'create', updatedAt: now }, { merge: true });
+    transaction.set(db.collection('eventSources').doc(candidateId), {
+      eventId: eventRef.id,
+      candidateId,
+      provider: candidate.provider,
+      providerItemId: candidate.providerItemId,
+      title: candidate.title,
+      summary: candidate.summary.slice(0, 700),
+      sourceUrl: candidate.sourceUrl,
+      publishedAt: candidate.publishedAt ? new Date(candidate.publishedAt) : null,
+      sourceTrust: candidate.sourceTrust,
+      createdAt: now,
+      updatedAt: now,
+    }, { merge: true });
+    const timelineType = candidate.sourceTrust?.tier === 'official' ? 'official_notice' : 'event_detected';
+    transaction.set(db.collection('eventTimeline').doc(timelineEntryId(eventRef.id, candidateId, timelineType)), {
+      eventId: eventRef.id,
+      entryType: timelineType,
+      eventTimestamp: candidate.publishedAt ? new Date(candidate.publishedAt) : now,
+      publicationTimestamp: candidate.publishedAt ? new Date(candidate.publishedAt) : null,
+      ingestionTimestamp: now,
+      sequence: 0,
+      source: candidate.provider,
+      authorUid: null,
+      handleSnapshot: null,
+      content: candidate.summary || candidate.title,
+      structuredData: null,
+      confidenceLabel: eventSnapshot.exists ? eventSnapshot.data().confidenceLabel || 'Emerging' : 'Emerging',
+      moderationState: 'approved',
+      correctionTargetId: null,
+      supersedesEntryId: null,
+      supersededByEntryId: null,
+      media: candidate.mediaPreview ? [candidate.mediaPreview] : [],
+      sourceAttribution: { provider: candidate.provider, title: candidate.title, sourceUrl: candidate.sourceUrl, sourceUnavailable: false },
+      geography: { locationText: candidate.locationText, coordinates: candidate.coordinates || null },
+      createdAt: now,
+      updatedAt: now,
+    }, { merge: true });
+    transaction.set(db.collection('eventStatusHistory').doc(), { eventId: eventRef.id, status: eventSnapshot.exists ? eventSnapshot.data().status : initialStatusForCandidate(candidate), reason: eventSnapshot.exists ? 'source_attached' : 'external_candidate_created', actorType: 'external_ingestion', createdAt: now });
+  });
+  await recalculateEvent(eventRef.id, { type: decision.action === 'attach' ? 'source_refreshed' : 'major_update', summary: candidate.title, dedupeKey: candidateId });
+  return { action: decision.action === 'attach' ? 'attach' : 'create', eventId: eventRef.id };
+}
+
+export const ingestGlobalEvents = onSchedule({ schedule: 'every 30 minutes', timeZone: 'Etc/UTC', maxInstances: 1 }, async () => {
+  const providersSnapshot = await db.collection('ingestionProviders').where('enabled', '==', true).limit(10).get();
+  const runRef = await db.collection('ingestionRuns').add({ status: 'running', providerCount: providersSnapshot.size, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  let candidateCount = 0; let errorCount = 0;
+  for (const providerDoc of providersSnapshot.docs) {
+    const provider = { id: providerDoc.id, ...providerDoc.data() };
+    try {
+      const candidates = await fetchProviderCandidates(provider);
+      candidateCount += candidates.length;
+      for (const candidate of candidates) await upsertCandidate(candidate, provider);
+      await providerDoc.ref.set({ lastRunAt: FieldValue.serverTimestamp(), lastError: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    } catch (error) {
+      errorCount += 1;
+      logger.error('Global Events provider failed', { providerId: provider.id, error: error.message });
+      await providerDoc.ref.set({ lastError: error.message, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+  }
+  await runRef.set({ status: errorCount ? 'completed_with_errors' : 'completed', candidateCount, errorCount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+});
+
+export const submitEventContribution = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const eventId = String(request.data?.eventId || '');
+  const contributionType = String(request.data?.type || '');
+  const body = String(request.data?.body || '').trim();
+  if (!eventId || !['Post', 'Report', 'Signal', 'Update', 'Correction', 'Source'].includes(contributionType)) throw new HttpsError('invalid-argument', 'Choose a valid Event contribution type.');
+  if (body.length < 3 || body.length > 2000) throw new HttpsError('invalid-argument', 'Add a useful contribution between 3 and 2000 characters.');
+  const eventRef = db.collection('events').doc(eventId);
+  const profileRef = db.collection('users').doc(uid);
+  const contributionRef = db.collection('eventContributions').doc();
+  await db.runTransaction(async (transaction) => {
+    const [eventSnapshot, profileSnapshot] = await Promise.all([transaction.get(eventRef), transaction.get(profileRef)]);
+    if (!eventSnapshot.exists || !isEligibleForVortex(eventSnapshot.data())) throw new HttpsError('not-found', 'This Event is unavailable.');
+    const profile = profileSnapshot.data() || {};
+    transaction.set(contributionRef, {
+      eventId,
+      contributionType,
+      body,
+      authorUid: uid,
+      authorHandle: profile.handle || profile.normalizedHandle || null,
+      authorDisplayName: profile.displayName || null,
+      locationPrecision: request.data?.locationPrecision || 'not_shared',
+      sourceUrl: request.data?.sourceUrl || null,
+      moderationState: 'approved',
+      visibility: 'public',
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.set(db.collection('eventTimeline').doc(contributionRef.id), {
+      entryId: contributionRef.id,
+      eventId,
+      entryType: contributionType,
+      eventTimestamp: request.data?.eventTimestamp ? new Date(request.data.eventTimestamp) : FieldValue.serverTimestamp(),
+      publicationTimestamp: FieldValue.serverTimestamp(),
+      ingestionTimestamp: FieldValue.serverTimestamp(),
+      sequence: 0,
+      source: contributionType === 'Source' ? request.data?.sourceUrl || null : null,
+      authorUid: uid,
+      handleSnapshot: profile.handle || profile.normalizedHandle || null,
+      content: body,
+      structuredData: request.data?.structuredData || null,
+      confidenceLabel: eventSnapshot.data().confidenceLabel || 'Emerging',
+      moderationState: 'approved',
+      correctionTargetId: request.data?.correctionTargetId || null,
+      supersedesEntryId: request.data?.supersedesEntryId || null,
+      supersededByEntryId: null,
+      media: request.data?.media || [],
+      sourceAttribution: request.data?.sourceUrl ? { sourceUrl: request.data.sourceUrl, sourceUnavailable: false } : null,
+      geography: request.data?.geography || null,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.set(db.collection('eventStatusHistory').doc(), { eventId, status: eventSnapshot.data().status, reason: `${contributionType.toLowerCase()}_added`, actorType: 'user', actorUid: uid, createdAt: FieldValue.serverTimestamp() });
+  });
+  await recalculateEvent(eventId, { type: contributionType === 'Update' ? 'major_update' : 'source_refreshed', summary: body.slice(0, 140), dedupeKey: contributionRef.id });
+  return { contributionId: contributionRef.id };
 });
 
 function requireAuth(request) {

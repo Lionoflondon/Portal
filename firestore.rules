@@ -103,6 +103,36 @@ service cloud.firestore {
       }
     }
 
+    match /eventSources/{sourceId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /eventContributions/{contributionId} {
+      allow read: if signedIn() && resource.data.visibility == 'public';
+      allow write: if false;
+    }
+
+    match /eventStatusHistory/{historyId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /eventTimeline/{entryId} {
+      allow read: if signedIn() && resource.data.moderationState != 'rejected';
+      allow write: if false;
+    }
+
+    match /eventRelationships/{relationshipId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /eventCandidates/{candidateId} { allow read, write: if false; }
+    match /eventMergeReviews/{reviewId} { allow read, write: if false; }
+    match /ingestionProviders/{providerId} { allow read, write: if false; }
+    match /ingestionRuns/{runId} { allow read, write: if false; }
+
     match /vortexEntries/{entryId} {
       allow read: if signedIn();
       allow write: if false;

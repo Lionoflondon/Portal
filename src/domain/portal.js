@@ -1,4 +1,4 @@
-export const eventStatuses = ['Breaking', 'Developing', 'Confirmed', 'Resolved', 'Historical'];
+export const eventStatuses = ['Breaking', 'Developing', 'Confirmed', 'Resolved', 'Historic'];
 export const sourceTypes = ['Eyewitness', 'Official', 'Media', 'Opinion', 'Community'];
 
 export const routes = [
@@ -16,5 +16,5 @@ export const secondaryRoutes = [
   { path: '/memory', label: 'Portal+ Memory', icon: 'premium' },
   { path: '/contributors', label: 'Contributor Hub', icon: 'creator' },
   { path: '/sources', label: 'Official Sources', icon: 'brand' },
-  { path: '/stewardship', label: 'Stewardship', icon: 'admin' },
+  { path: '/custodians', label: 'Custodians', icon: 'admin' },
 ];
