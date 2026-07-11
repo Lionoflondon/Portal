@@ -15,12 +15,25 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow create: if isOwner(uid);
-      allow read, update, delete: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['displayName', 'email', 'preferences', 'createdAt', 'updatedAt']);
+      allow read, delete: if isOwner(uid);
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['displayName', 'preferences', 'profilePhotoUrl', 'bio', 'updatedAt']);
 
       match /{privateDocument=**} {
         allow read, write: if isOwner(uid);
       }
+    }
+
+    match /handles/{handle} {
+      allow read, write: if false;
+    }
+
+    match /publicProfiles/{uid} {
+      allow read: if true;
+      allow write: if false;
     }
 
     match /events/{eventId} {

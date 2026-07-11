@@ -26,6 +26,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -43,6 +44,7 @@ export const portalFirebase = hasFirebaseConfig ? initializeApp(firebaseConfig) 
 export const portalAuth = portalFirebase ? getAuth(portalFirebase) : null;
 export const portalDb = portalFirebase ? getFirestore(portalFirebase) : null;
 export const portalStorage = portalFirebase ? getStorage(portalFirebase) : null;
+export const portalFunctions = portalFirebase ? getFunctions(portalFirebase, 'europe-west2') : null;
 
 function requireService(service, name) {
   if (!service) throw new Error(`Portal ${name} is not configured.`);
@@ -121,6 +123,7 @@ export async function createPortalEvent(user, values) {
     moderationState: 'approved',
     publishedAt: serverTimestamp(),
     createdBy: user.uid,
+    authorUid: user.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -194,6 +197,7 @@ export async function publishPortalReport(user, values, onProgress) {
       moderationState: 'approved',
       publishedAt: serverTimestamp(),
       createdBy: user.uid,
+      authorUid: user.uid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -212,6 +216,7 @@ export async function publishPortalReport(user, values, onProgress) {
     publishedAt: serverTimestamp(),
     media: {},
     createdBy: user.uid,
+    authorUid: user.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -251,3 +256,13 @@ export function setVortexFollow(uid, eventId, following) {
 export async function getPortalProfile(uid) {
   return getDoc(doc(requireService(portalDb, 'Firestore'), 'users', uid));
 }
+
+function callPortalIdentity(name, payload) {
+  return httpsCallable(requireService(portalFunctions, 'Functions'), name)(payload).then((result) => result.data);
+}
+
+export function checkPortalHandle(handle) { return callPortalIdentity('checkHandleAvailability', { handle }); }
+export function reservePortalHandle(handle) { return callPortalIdentity('reserveHandle', { handle }); }
+export function changePortalHandle(handle) { return callPortalIdentity('changeHandle', { handle }); }
+export function resolvePortalHandle(handle) { return callPortalIdentity('resolveHandle', { handle }); }
+export function searchPortalProfiles(term) { return callPortalIdentity('searchPortalProfiles', { term }); }
