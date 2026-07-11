@@ -81,13 +81,28 @@ export function sendPortalPasswordReset(email) {
   return sendPasswordResetEmail(requireService(portalAuth, 'Authentication'), email);
 }
 
-export async function updatePortalProfile(user, { displayName, emailUpdates }) {
-  await updateProfile(user, { displayName });
+export async function updatePortalProfile(user, { displayName, emailUpdates, bio, location, website, profilePhotoUrl }) {
+  if (displayName) await updateProfile(user, { displayName });
   await setDoc(doc(requireService(portalDb, 'Firestore'), 'users', user.uid), {
-    displayName,
-    preferences: { emailUpdates: Boolean(emailUpdates) },
+    ...(displayName ? { displayName } : {}),
+    ...(emailUpdates === undefined ? {} : { preferences: { emailUpdates: Boolean(emailUpdates) } }),
+    ...(bio === undefined ? {} : { bio }),
+    ...(location === undefined ? {} : { location }),
+    ...(website === undefined ? {} : { website }),
+    ...(profilePhotoUrl === undefined ? {} : { profilePhotoUrl }),
     updatedAt: serverTimestamp(),
   }, { merge: true });
+}
+
+export function uploadPortalProfilePhoto(user, file, onProgress) {
+  if (!file?.type?.startsWith('image/')) throw new Error('Choose an image file for your profile photo.');
+  if (file.size > 10 * 1024 * 1024) throw new Error('Profile photos must be 10 MB or smaller.');
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-').slice(-100) || 'photo';
+  const path = `users/${user.uid}/private/profile/${Date.now()}-${safeName}`;
+  const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, { contentType: file.type });
+  return new Promise((resolve, reject) => task.on('state_changed', (snapshot) => onProgress?.(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
+    try { resolve(await getDownloadURL(task.snapshot.ref)); } catch (error) { reject(error); }
+  }));
 }
 
 export function changePortalPassword(password) {
@@ -262,7 +277,7 @@ function callPortalIdentity(name, payload) {
 }
 
 export function checkPortalHandle(handle) { return callPortalIdentity('checkHandleAvailability', { handle }); }
-export function reservePortalHandle(handle) { return callPortalIdentity('reserveHandle', { handle }); }
+export function reservePortalHandle(handle, profile) { return callPortalIdentity('reserveHandle', { handle, ...(profile ? { profile } : {}) }); }
 export function changePortalHandle(handle) { return callPortalIdentity('changeHandle', { handle }); }
 export function resolvePortalHandle(handle) { return callPortalIdentity('resolveHandle', { handle }); }
 export function searchPortalProfiles(term) { return callPortalIdentity('searchPortalProfiles', { term }); }

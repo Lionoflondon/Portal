@@ -82,12 +82,29 @@ function requireAuth(request) {
 
 async function handleAvailability(value) {
   const validation = validateHandle(value);
-  if (!validation.valid) return { available: false, state: 'invalid', reason: validation.reason };
+  if (!validation.valid) return { available: false, state: validation.state || 'invalid', reason: validation.reason };
   const active = await db.collection('handles').doc(validation.normalizedHandle).get();
-  return active.exists ? { available: false, state: 'unavailable', normalizedHandle: validation.normalizedHandle } : { available: true, state: 'available', normalizedHandle: validation.normalizedHandle };
+  if (!active.exists) return { available: true, state: 'available', normalizedHandle: validation.normalizedHandle };
+  const handle = active.data();
+  const state = handle.status === 'protected' || handle.saleEligible === false ? 'protected' : handle.status === 'redirect' || handle.status === 'reserved' ? 'reserved' : 'taken';
+  return { available: false, state, normalizedHandle: validation.normalizedHandle };
 }
 
-async function claimHandle(uid, requestedHandle, changing = false) {
+function profileSetup(input) {
+  if (!input || typeof input !== 'object') return null;
+  const displayName = String(input.displayName || '').trim();
+  if (displayName.length < 2 || displayName.length > 80) throw new HttpsError('invalid-argument', 'Add a display name between 2 and 80 characters.');
+  const bio = String(input.bio || '').trim();
+  const location = String(input.location || '').trim();
+  const website = String(input.website || '').trim();
+  if (bio.length > 240 || location.length > 120) throw new HttpsError('invalid-argument', 'Keep your bio and location concise.');
+  if (website) {
+    try { const parsed = new URL(website); if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('protocol'); } catch { throw new HttpsError('invalid-argument', 'Use a valid website URL.'); }
+  }
+  return { displayName, bio, location, website };
+}
+
+async function claimHandle(uid, requestedHandle, changing = false, setup = null) {
   const validation = validateHandle(requestedHandle);
   if (!validation.valid) throw new HttpsError('invalid-argument', validation.reason);
   const now = Date.now();
@@ -96,7 +113,7 @@ async function claimHandle(uid, requestedHandle, changing = false) {
   return db.runTransaction(async (transaction) => {
     const [profileSnapshot, targetSnapshot] = await Promise.all([transaction.get(profileRef), transaction.get(targetRef)]);
     const profile = profileSnapshot.data() || {};
-    if (targetSnapshot.exists && targetSnapshot.data().uid !== uid) throw new HttpsError('already-exists', 'That handle is unavailable.');
+    if (targetSnapshot.exists && targetSnapshot.data().uid !== uid) throw new HttpsError('already-exists', 'That handle was just taken. Please choose another.');
     if (profile.normalizedHandle === validation.normalizedHandle) return { handle: profile.handle, normalizedHandle: profile.normalizedHandle, idempotent: true };
     const lastAttempt = profile.handleLastAttemptAt?.toMillis?.() || 0;
     if (now - lastAttempt < 5_000) throw new HttpsError('resource-exhausted', 'Try that again in a moment.');
@@ -108,7 +125,7 @@ async function claimHandle(uid, requestedHandle, changing = false) {
     }
     const originalHandle = requestedHandle.trim().replace(/^@/, '');
     transaction.set(targetRef, { uid, ownerUid: uid, originalHandle, normalizedHandle: validation.normalizedHandle, status: 'active', marketplaceClass: 'active_user', saleEligible: true, claimEligible: false, verificationRequired: false, previousHandle: profile.normalizedHandle || null, reservedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    transaction.set(profileRef, { handle: originalHandle, normalizedHandle: validation.normalizedHandle, handleReservedAt: profile.handleReservedAt || FieldValue.serverTimestamp(), handleChangedAt: FieldValue.serverTimestamp(), handleLastAttemptAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.set(profileRef, { ...(setup || {}), handle: originalHandle, normalizedHandle: validation.normalizedHandle, handleReservedAt: profile.handleReservedAt || FieldValue.serverTimestamp(), handleChangedAt: FieldValue.serverTimestamp(), handleLastAttemptAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     return { handle: originalHandle, normalizedHandle: validation.normalizedHandle, idempotent: false };
   });
 }
@@ -118,7 +135,7 @@ export const checkHandleAvailability = onCall(async (request) => {
   return handleAvailability(request.data?.handle || '');
 });
 
-export const reserveHandle = onCall(async (request) => claimHandle(requireAuth(request), request.data?.handle || '', false));
+export const reserveHandle = onCall(async (request) => claimHandle(requireAuth(request), request.data?.handle || '', false, profileSetup(request.data?.profile)));
 export const changeHandle = onCall(async (request) => claimHandle(requireAuth(request), request.data?.handle || '', true));
 
 export const resolveHandle = onCall(async (request) => {
@@ -152,7 +169,7 @@ export const syncPublicPortalProfile = onDocumentWritten('users/{uid}', async (e
   if (!event.data?.after.exists) { await target.delete(); return; }
   const user = event.data.after.data();
   if (!user.normalizedHandle || user.handleStatus === 'suspended') { await target.delete(); return; }
-  await target.set({ uid: event.params.uid, displayName: user.displayName || null, handle: user.handle, normalizedHandle: user.normalizedHandle, profilePhotoUrl: user.profilePhotoUrl || null, bio: user.bio || null, accountType: user.accountType || 'member', verificationState: user.verificationState || 'unverified', joinedAt: user.createdAt || null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await target.set({ uid: event.params.uid, displayName: user.displayName || null, handle: user.handle, normalizedHandle: user.normalizedHandle, profilePhotoUrl: user.profilePhotoUrl || null, bio: user.bio || null, location: user.location || null, website: user.website || null, accountType: user.accountType || 'member', verificationState: user.verificationState || 'unverified', joinedAt: user.createdAt || null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 });
 
 export const notifyPortalReportMentions = onDocumentWritten('events/{eventId}/reports/{reportId}', async (event) => {

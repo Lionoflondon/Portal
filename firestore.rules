@@ -20,9 +20,13 @@ service cloud.firestore {
       allow read, delete: if isOwner(uid);
       allow update: if isOwner(uid)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['displayName', 'preferences', 'profilePhotoUrl', 'bio', 'updatedAt']);
+          .hasOnly(['displayName', 'preferences', 'profilePhotoUrl', 'bio', 'location', 'website', 'updatedAt']);
 
-      match /{privateDocument=**} {
+      match /vortex/{privateDocument=**} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /private/{privateDocument=**} {
         allow read, write: if isOwner(uid);
       }
     }

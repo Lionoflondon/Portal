@@ -33,6 +33,14 @@ describe('Portal Firebase rules', () => {
     await assertFails(getDoc(doc(maya.firestore(), 'users/jason/vortex/event-1')));
   });
 
+  it('blocks direct handle ownership writes while allowing profile details', async () => {
+    const jason = testEnv.authenticatedContext('jason-profile');
+    await assertSucceeds(setDoc(doc(jason.firestore(), 'users/jason-profile'), { displayName: 'Jason', email: 'jason@example.com', preferences: {}, createdAt: new Date(), updatedAt: new Date() }));
+    await assertSucceeds(setDoc(doc(jason.firestore(), 'users/jason-profile'), { bio: 'Building Portal.', location: 'London', website: 'https://portal.example' }, { merge: true }));
+    await assertFails(setDoc(doc(jason.firestore(), 'users/jason-profile'), { handle: 'jason' }, { merge: true }));
+    await assertFails(setDoc(doc(jason.firestore(), 'handles/jason'), { ownerUid: 'jason-profile' }));
+  });
+
   it('allows shared event reads while preserving creator-only writes', async () => {
     const jason = testEnv.authenticatedContext('jason');
     const maya = testEnv.authenticatedContext('maya');
