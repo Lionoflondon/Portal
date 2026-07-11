@@ -117,6 +117,9 @@ export async function createPortalEvent(user, values) {
     status: values.status,
     parentEventId: values.parentEventId || null,
     archived: false,
+    visibility: 'public',
+    moderationState: 'approved',
+    publishedAt: serverTimestamp(),
     createdBy: user.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -187,6 +190,9 @@ export async function publishPortalReport(user, values, onProgress) {
       status: 'Developing',
       parentEventId: null,
       archived: false,
+      visibility: 'public',
+      moderationState: 'approved',
+      publishedAt: serverTimestamp(),
       createdBy: user.uid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -200,6 +206,10 @@ export async function publishPortalReport(user, values, onProgress) {
     occurredAt: values.occurredAt ? Timestamp.fromDate(new Date(values.occurredAt)) : null,
     sourceType: values.identityMode === 'Casual' ? 'Community' : 'Eyewitness',
     identityMode: values.identityMode,
+    visibility: 'public',
+    moderationState: 'approved',
+    draft: false,
+    publishedAt: serverTimestamp(),
     media: {},
     createdBy: user.uid,
     createdAt: serverTimestamp(),
@@ -221,6 +231,14 @@ export async function publishPortalReport(user, values, onProgress) {
 
 export function observeVortex(uid, callback, onError) {
   return onSnapshot(collection(requireService(portalDb, 'Firestore'), 'users', uid, 'vortex'), callback, onError);
+}
+
+export function observeVortexEntries(callback, onError) {
+  return onSnapshot(
+    query(collection(requireService(portalDb, 'Firestore'), 'vortexEntries'), orderBy('latestActivityAt', 'desc')),
+    callback,
+    onError,
+  );
 }
 
 export function setVortexFollow(uid, eventId, following) {
