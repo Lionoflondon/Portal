@@ -125,7 +125,8 @@ function CreateModal({ open, onClose, user, events }) {
   function pickMedia(kind, file) {
     if (!file) return update(kind, null);
     const expected = kind === 'photo' ? 'image/' : 'video/';
-    if (!file.type.startsWith(expected) || file.size > 10 * 1024 * 1024) { setError(`${kind === 'photo' ? 'Photos' : 'Videos'} must be a valid ${kind} under 10 MB.`); return; }
+    const limitMb = kind === 'photo' ? 25 : 100;
+    if (!file.type.startsWith(expected) || file.size > limitMb * 1024 * 1024) { setError(`${kind === 'photo' ? 'Photos' : 'Videos'} must be a valid ${kind} under ${limitMb} MB.`); return; }
     setError(''); update(kind, file);
   }
   async function submit(event) {
