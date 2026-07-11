@@ -1,4 +1,21 @@
 {
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8085
+    },
+    "storage": {
+      "port": 9195
+    },
+    "ui": {
+      "enabled": false
+    }
+  },
   "hosting": {
     "target": "portal",
     "public": "dist",

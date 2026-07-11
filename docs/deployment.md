@@ -34,7 +34,14 @@ Run only Portal-local checks:
 ```bash
 npm run lint
 npm test
+npm run test:rules
 npm run build
+```
+
+Deploy Portal-only rules and hosting with:
+
+```bash
+firebase deploy --only firestore:rules,storage,hosting:portal --project portal-prod-f2308
 ```
 
 Deploy only after:

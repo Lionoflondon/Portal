@@ -17,26 +17,31 @@ Key areas:
 
 - `src/ui/App.jsx`: app shell, routes, pages, reusable UI sections.
 - `src/styles.css`: Portal design tokens and responsive styling from the approved prototype.
-- `src/domain/portal.js`: current static domain fixtures and product vocabulary.
+- `src/domain/portal.js`: shared product vocabulary and route definitions.
 - `src/services/firebase.js`: Portal-only Firebase service boundaries.
 
 ## Backend Boundary
 
-The app has service interfaces for:
+The app uses only Portal Firebase services:
 
 - Firebase Authentication
 - Cloud Firestore
 - Firebase Storage
 
-No Cloud Functions are created yet. The approved prototype does not require server-side execution for the first canonical foundation.
+No Cloud Functions are created. Authentication, ownership enforcement, and server timestamps are handled by Firebase Authentication, Firestore rules, and Firestore itself; there is no server-side workflow that needs a separate function yet.
 
 ## Data Services
 
-Current data is static fixture data. Firestore collections should be introduced only when product workflows are implemented:
+Firestore collections:
 
-- `events`
-- `reports`
-- `conversations`
-- `sources`
-- `constellations`
-- `contributors`
+- `users/{uid}`: private Portal profile and preferences.
+- `users/{uid}/vortex/{eventId}`: private followed-event map used by Vortex.
+- `events/{eventId}`: shared real-world event, its status, summary, relationship parent, ownership, and timestamps.
+- `events/{eventId}/reports/{reportId}`: shared evidence attached to an event, owned by its submitter.
+
+Storage is reserved for approved UI upload flows:
+
+- `users/{uid}/private/...`: owner-only private files.
+- `event-media/{eventId}/{uid}/{fileName}`: authenticated owned image/video evidence, max 10 MiB.
+
+No sample content is used by the live routes. Events and Vortex populate from Firestore after authentication.

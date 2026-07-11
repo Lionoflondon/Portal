@@ -1,6 +1,29 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import {
+  createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+  updatePassword,
+  updateProfile,
+} from 'firebase/auth';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getFirestore,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -19,3 +42,132 @@ export const portalFirebase = hasFirebaseConfig ? initializeApp(firebaseConfig) 
 export const portalAuth = portalFirebase ? getAuth(portalFirebase) : null;
 export const portalDb = portalFirebase ? getFirestore(portalFirebase) : null;
 export const portalStorage = portalFirebase ? getStorage(portalFirebase) : null;
+
+function requireService(service, name) {
+  if (!service) throw new Error(`Portal ${name} is not configured.`);
+  return service;
+}
+
+export function observeSession(callback) {
+  return onAuthStateChanged(requireService(portalAuth, 'Authentication'), callback);
+}
+
+export async function registerPortalUser({ displayName, email, password }) {
+  const auth = requireService(portalAuth, 'Authentication');
+  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  await updateProfile(credential.user, { displayName });
+  await setDoc(doc(requireService(portalDb, 'Firestore'), 'users', credential.user.uid), {
+    displayName,
+    email: credential.user.email,
+    preferences: { emailUpdates: true },
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return credential.user;
+}
+
+export function signInPortalUser(email, password) {
+  return signInWithEmailAndPassword(requireService(portalAuth, 'Authentication'), email, password);
+}
+
+export function signOutPortalUser() {
+  return signOut(requireService(portalAuth, 'Authentication'));
+}
+
+export function sendPortalPasswordReset(email) {
+  return sendPasswordResetEmail(requireService(portalAuth, 'Authentication'), email);
+}
+
+export async function updatePortalProfile(user, { displayName, emailUpdates }) {
+  await updateProfile(user, { displayName });
+  await setDoc(doc(requireService(portalDb, 'Firestore'), 'users', user.uid), {
+    displayName,
+    preferences: { emailUpdates: Boolean(emailUpdates) },
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+}
+
+export function changePortalPassword(password) {
+  const user = requireService(portalAuth, 'Authentication').currentUser;
+  if (!user) throw new Error('Please sign in again before changing your password.');
+  return updatePassword(user, password);
+}
+
+export function observeProfile(uid, callback, onError) {
+  return onSnapshot(doc(requireService(portalDb, 'Firestore'), 'users', uid), callback, onError);
+}
+
+export function observeEvents(callback, onError, includeArchived = false) {
+  const events = collection(requireService(portalDb, 'Firestore'), 'events');
+  const eventQuery = includeArchived
+    ? query(events, orderBy('updatedAt', 'desc'))
+    : query(events, where('archived', '==', false), orderBy('updatedAt', 'desc'));
+  return onSnapshot(eventQuery, callback, onError);
+}
+
+export function observeEvent(eventId, callback, onError) {
+  return onSnapshot(doc(requireService(portalDb, 'Firestore'), 'events', eventId), callback, onError);
+}
+
+export async function createPortalEvent(user, values) {
+  return addDoc(collection(requireService(portalDb, 'Firestore'), 'events'), {
+    title: values.title.trim(),
+    summary: values.summary.trim(),
+    status: values.status,
+    parentEventId: values.parentEventId || null,
+    archived: false,
+    createdBy: user.uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export function updatePortalEvent(eventId, values) {
+  return updateDoc(doc(requireService(portalDb, 'Firestore'), 'events', eventId), {
+    title: values.title.trim(),
+    summary: values.summary.trim(),
+    status: values.status,
+    parentEventId: values.parentEventId || null,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export function archivePortalEvent(eventId) {
+  return updateDoc(doc(requireService(portalDb, 'Firestore'), 'events', eventId), {
+    archived: true,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export function observeReports(eventId, callback, onError) {
+  return onSnapshot(
+    query(collection(requireService(portalDb, 'Firestore'), 'events', eventId, 'reports'), orderBy('createdAt', 'desc')),
+    callback,
+    onError,
+  );
+}
+
+export function createPortalReport(user, eventId, values) {
+  return addDoc(collection(requireService(portalDb, 'Firestore'), 'events', eventId, 'reports'), {
+    body: values.body.trim(),
+    sourceType: values.sourceType,
+    createdBy: user.uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export function observeVortex(uid, callback, onError) {
+  return onSnapshot(collection(requireService(portalDb, 'Firestore'), 'users', uid, 'vortex'), callback, onError);
+}
+
+export function setVortexFollow(uid, eventId, following) {
+  const reference = doc(requireService(portalDb, 'Firestore'), 'users', uid, 'vortex', eventId);
+  return following
+    ? setDoc(reference, { eventId, createdAt: serverTimestamp() })
+    : deleteDoc(reference);
+}
+
+export async function getPortalProfile(uid) {
+  return getDoc(doc(requireService(portalDb, 'Firestore'), 'users', uid));
+}

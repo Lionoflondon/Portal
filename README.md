@@ -20,6 +20,7 @@ React with Vite is used because the approved Portal prototype is a client-side a
 npm install
 npm run lint
 npm test
+npm run test:rules
 npm run build
 ```
 
@@ -40,5 +41,7 @@ dist/
 ## Firebase
 
 Portal uses only a dedicated Portal Firebase project. Runtime Firebase configuration is supplied through `VITE_FIREBASE_*` environment variables. See `.env.example`.
+
+Phase 2 connects Firebase Authentication, Cloud Firestore, and Cloud Storage. Firestore and Storage rules live in `firestore.rules` and `storage.rules`; use Java 21+ when running the Firebase emulators for `npm run test:rules`.
 
 No Firebase deployment should happen unless the project, hosting site, and hosting target are confirmed as Portal-only.
