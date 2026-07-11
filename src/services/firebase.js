@@ -363,6 +363,32 @@ export function observePortalMessages(conversationId, callback, onError) {
   return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'messageConversations', conversationId, 'messages'), orderBy('createdAt', 'asc'), limit(80)), callback, onError);
 }
 
+export async function createPortalConversation(user, profile) {
+  const db = requireService(portalDb, 'Firestore');
+  if (!profile?.uid || profile.uid === user.uid) throw new Error('Choose another Portal profile to message.');
+  const participants = [user.uid, profile.uid].sort();
+  const conversationId = `dm_${participants.join('_')}`;
+  const conversationRef = doc(db, 'messageConversations', conversationId);
+  const existing = await getDoc(conversationRef);
+  if (!existing.exists()) {
+    await setDoc(conversationRef, {
+      participantUids: participants,
+      participantHandles: [user.displayName || 'You', profile.handle || profile.displayName || 'Portal user'],
+      participantPhotoUrls: [user.photoURL || '', profile.profilePhotoUrl || ''],
+      title: profile.displayName || `@${profile.handle}`,
+      createdBy: user.uid,
+      lastMessage: '',
+      lastMessageAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+      pinned: false,
+      unreadBy: [],
+      typingUids: [],
+    });
+  }
+  return conversationId;
+}
+
 export async function sendPortalMessage(user, conversation, body, media = null) {
   const db = requireService(portalDb, 'Firestore');
   const conversationRef = doc(db, 'messageConversations', conversation.id);
