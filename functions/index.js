@@ -7,9 +7,10 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { logger } from 'firebase-functions';
 import { entryIdFor, isEligibleForVortex, makeEntry, preferredEntryType } from './entry-engine.js';
-import { HANDLE_CHANGE_COOLDOWN_MS, HANDLE_REDIRECT_GRACE_MS, normalizeHandle, validateHandle } from './identity-engine.js';
+import { normalizeHandle, validateHandle } from './identity-engine.js';
 import { registryDecision, requiresElevatedReclaim } from './handle-registry.js';
 import { validateReclaimRequest } from './reclaim-policy.js';
+import { canAutoIssueFreeHandle, evaluateHandleRisk } from './handle-risk-engine.js';
 import { echoKey, echoNotificationId, isEchoablePost, nextEchoCount } from './echo-engine.js';
 import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
 import { confidenceFromSignals, dedupeDecision, initialStatusForCandidate, isMeaningfulEventChange, normaliseCandidate, shouldPublishCandidate, timelineEntryId } from './global-events-engine.js';
@@ -589,7 +590,76 @@ function profileSetup(input) {
   return { displayName, bio, location, website };
 }
 
-async function claimHandle(uid, requestedHandle, changing = false, setup = null) {
+function millis(value) {
+  return value?.toMillis?.() || (value instanceof Date ? value.getTime() : 0);
+}
+
+function clientRiskHints(request) {
+  const hints = request.data?.riskSignals || {};
+  const safeString = (value) => String(value || '').trim().slice(0, 160);
+  return {
+    deviceSignature: safeString(hints.deviceSignature || request.data?.deviceSignature),
+    browserSignature: safeString(hints.browserSignature || request.data?.browserSignature),
+    networkSignature: safeString(hints.networkSignature || request.data?.networkSignature),
+    ipReputation: ['standard', 'elevated', 'high_risk'].includes(hints.ipReputation) ? hints.ipReputation : 'standard',
+    knownFraudIndicator: hints.knownFraudIndicator === true,
+  };
+}
+
+async function collectHandleRiskSignals(uid, request, normalizedHandle, profile = {}) {
+  const now = Date.now();
+  const hints = clientRiskHints(request);
+  const accountCreatedAt = millis(profile.createdAt);
+  const since24h = new Date(now - 24 * 60 * 60 * 1000);
+  const since30d = new Date(now - 30 * 24 * 60 * 60 * 1000);
+  const [
+    previousFreeChanges,
+    declinedRequests,
+    protectedAttempts,
+    recentRequests,
+    deviceMatches,
+    browserMatches,
+    networkVelocity,
+  ] = await Promise.all([
+    db.collection('handleRequests').where('uid', '==', uid).where('requestType', '==', 'free').where('status', '==', 'approved').where('createdAt', '>=', since30d).count().get(),
+    db.collection('handleRequests').where('uid', '==', uid).where('status', 'in', ['rejected', 'declined']).count().get(),
+    db.collection('handleRequests').where('uid', '==', uid).where('targetPolicyState', 'in', ['reserved', 'protected']).count().get(),
+    db.collection('handleRequests').where('uid', '==', uid).where('createdAt', '>=', since24h).count().get(),
+    hints.deviceSignature ? db.collection('handleRiskSignals').where('kind', '==', 'device').where('signature', '==', hints.deviceSignature).count().get() : Promise.resolve({ data: () => ({ count: 0 }) }),
+    hints.browserSignature ? db.collection('handleRiskSignals').where('kind', '==', 'browser').where('signature', '==', hints.browserSignature).count().get() : Promise.resolve({ data: () => ({ count: 0 }) }),
+    hints.networkSignature ? db.collection('handleRiskSignals').where('kind', '==', 'network').where('signature', '==', hints.networkSignature).where('createdAt', '>=', since24h).count().get() : Promise.resolve({ data: () => ({ count: 0 }) }),
+  ]);
+  return {
+    emailVerified: request.auth?.token?.email_verified === true,
+    phoneEnabled: Boolean(request.auth?.token?.phone_number || request.auth?.token?.phone_verified),
+    phoneVerified: Boolean(request.auth?.token?.phone_number || request.auth?.token?.phone_verified === true),
+    accountAgeDays: accountCreatedAt ? Math.floor((now - accountCreatedAt) / (24 * 60 * 60 * 1000)) : 0,
+    goodStandingDays: profile.suspended === true || profile.banned === true ? 0 : (accountCreatedAt ? Math.floor((now - accountCreatedAt) / (24 * 60 * 60 * 1000)) : 0),
+    previousActiveHandles: profile.normalizedHandle ? 1 : 0,
+    previousFreeHandleChanges30d: previousFreeChanges.data().count,
+    previousDeclinedRequests: declinedRequests.data().count,
+    protectedHandleAttempts: protectedAttempts.data().count,
+    recentHandleRequests24h: recentRequests.data().count,
+    deviceMatchCount: deviceMatches.data().count,
+    browserMatchCount: browserMatches.data().count,
+    networkAccountVelocity24h: networkVelocity.data().count,
+    relatedSuspendedAccounts: profile.relatedSuspendedAccountCount || 0,
+    ipReputation: hints.ipReputation,
+    knownFraudIndicator: hints.knownFraudIndicator,
+    hints,
+  };
+}
+
+async function recordRiskSignals(uid, requestId, signals) {
+  const writes = [];
+  const now = FieldValue.serverTimestamp();
+  if (signals.hints?.deviceSignature) writes.push(db.collection('handleRiskSignals').doc(`device_${signals.hints.deviceSignature}_${uid}`).set({ kind: 'device', signature: signals.hints.deviceSignature, uid, requestId, createdAt: now, updatedAt: now }, { merge: true }));
+  if (signals.hints?.browserSignature) writes.push(db.collection('handleRiskSignals').doc(`browser_${signals.hints.browserSignature}_${uid}`).set({ kind: 'browser', signature: signals.hints.browserSignature, uid, requestId, createdAt: now, updatedAt: now }, { merge: true }));
+  if (signals.hints?.networkSignature) writes.push(db.collection('handleRiskSignals').doc(`network_${signals.hints.networkSignature}_${uid}_${requestId}`).set({ kind: 'network', signature: signals.hints.networkSignature, uid, requestId, createdAt: now, updatedAt: now }, { merge: true }));
+  await Promise.all(writes);
+}
+
+async function claimHandle(request, uid, requestedHandle, changing = false, setup = null) {
   const validation = validateHandle(requestedHandle);
   if (!validation.valid) throw new HttpsError('invalid-argument', validation.reason);
   const now = Date.now();
@@ -598,27 +668,67 @@ async function claimHandle(uid, requestedHandle, changing = false, setup = null)
   const reservedRef = db.collection('reservedHandles').doc(validation.normalizedHandle);
   const protectedRef = db.collection('protectedHandles').doc(validation.normalizedHandle);
   const policyRef = db.collection('handlePolicies').doc(validation.normalizedHandle);
-  return db.runTransaction(async (transaction) => {
+  const profileSnapshotBefore = await profileRef.get();
+  const profileBefore = profileSnapshotBefore.data() || {};
+  const riskSignals = await collectHandleRiskSignals(uid, request, validation.normalizedHandle, profileBefore);
+  const riskEvaluation = evaluateHandleRisk({ uid, normalizedHandle: validation.normalizedHandle, signals: riskSignals });
+  const requestRef = db.collection('handleRequests').doc();
+  const result = await db.runTransaction(async (transaction) => {
     const [profileSnapshot, targetSnapshot, reservedSnapshot, protectedSnapshot, policySnapshot] = await Promise.all([transaction.get(profileRef), transaction.get(targetRef), transaction.get(reservedRef), transaction.get(protectedRef), transaction.get(policyRef)]);
     const profile = profileSnapshot.data() || {};
     const existingOwnerUid = targetSnapshot.data()?.ownerUid || targetSnapshot.data()?.uid || null;
     if (existingOwnerUid && existingOwnerUid !== uid) throw new HttpsError('already-exists', 'That handle was just taken. Please choose another.');
     const decision = registryDecision({ reserved: reservedSnapshot, protectedHandle: protectedSnapshot, policy: policySnapshot, now });
-    if (!decision.allowed) throw new HttpsError('failed-precondition', decision.reason);
+    const targetPolicyState = decision.allowed ? 'normal' : decision.state;
+    transaction.set(requestRef, {
+      requestId: requestRef.id,
+      uid,
+      normalizedHandle: validation.normalizedHandle,
+      originalHandle: requestedHandle.trim().replace(/^@/, ''),
+      requestType: 'free',
+      targetPolicyState,
+      status: decision.allowed && canAutoIssueFreeHandle(riskEvaluation) ? 'approved' : riskEvaluation.publicState,
+      approvalState: decision.allowed && canAutoIssueFreeHandle(riskEvaluation) ? 'approved' : 'pending_review',
+      issuanceState: decision.allowed && canAutoIssueFreeHandle(riskEvaluation) ? 'issued' : 'not_issued',
+      paymentState: 'not_required',
+      riskScore: riskEvaluation.score,
+      riskBand: riskEvaluation.band,
+      riskReasons: riskEvaluation.reasons,
+      emailVerified: riskSignals.emailVerified,
+      phoneVerified: riskSignals.phoneVerified,
+      deviceMatchCount: riskSignals.deviceMatchCount,
+      browserMatchCount: riskSignals.browserMatchCount,
+      relatedAccountIndicators: {
+        networkAccountVelocity24h: riskSignals.networkAccountVelocity24h,
+        relatedSuspendedAccounts: riskSignals.relatedSuspendedAccounts,
+      },
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    if (!decision.allowed) {
+      transaction.set(db.collection('auditLogs').doc(), { system: 'portal_handle_risk', action: 'protected_or_reserved_handle_requested', actorUid: uid, normalizedHandle: validation.normalizedHandle, riskBand: riskEvaluation.band, createdAt: FieldValue.serverTimestamp() });
+      return { status: 'declined', publicState: 'Declined', reason: decision.reason, requestId: requestRef.id };
+    }
     if (profile.normalizedHandle === validation.normalizedHandle) return { handle: profile.handle, normalizedHandle: profile.normalizedHandle, idempotent: true };
     const lastAttempt = profile.handleLastAttemptAt?.toMillis?.() || 0;
     if (now - lastAttempt < 5_000) throw new HttpsError('resource-exhausted', 'Try that again in a moment.');
-    const lastChange = profile.handleChangedAt?.toMillis?.() || 0;
-    if (changing && profile.normalizedHandle && now - lastChange < HANDLE_CHANGE_COOLDOWN_MS) throw new HttpsError('failed-precondition', 'Handles can be changed once every 30 days.');
+    if (!canAutoIssueFreeHandle(riskEvaluation)) {
+      transaction.set(db.collection('auditLogs').doc(), { system: 'portal_handle_risk', action: 'handle_request_queued', actorUid: uid, normalizedHandle: validation.normalizedHandle, riskBand: riskEvaluation.band, createdAt: FieldValue.serverTimestamp() });
+      return { status: riskEvaluation.publicState, publicState: riskEvaluation.publicState === 'pending_review' ? 'Pending Review' : riskEvaluation.publicState === 'additional_verification_required' ? 'Additional verification required' : 'Pending Review', requestId: requestRef.id };
+    }
     if (profile.normalizedHandle) {
       const oldHandleRef = db.collection('handles').doc(profile.normalizedHandle);
-      transaction.set(oldHandleRef, { uid, originalHandle: profile.handle, normalizedHandle: profile.normalizedHandle, status: 'redirect', redirectTo: validation.normalizedHandle, redirectExpiresAt: new Date(now + HANDLE_REDIRECT_GRACE_MS), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(oldHandleRef, { uid: null, ownerUid: null, previousOwnerUid: uid, originalHandle: profile.handle, normalizedHandle: profile.normalizedHandle, status: 'marketplace', marketplaceClass: 'marketplace', saleEligible: true, claimEligible: false, currentListingId: null, releasedFromFreeHandleAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     }
     const originalHandle = requestedHandle.trim().replace(/^@/, '');
-    transaction.set(targetRef, { uid, ownerUid: uid, originalHandle, normalizedHandle: validation.normalizedHandle, status: 'active', marketplaceClass: 'active_user', saleEligible: true, claimEligible: false, verificationRequired: false, previousHandle: profile.normalizedHandle || null, reservedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    transaction.set(profileRef, { ...(setup || {}), handle: originalHandle, normalizedHandle: validation.normalizedHandle, handleReservedAt: profile.handleReservedAt || FieldValue.serverTimestamp(), handleChangedAt: FieldValue.serverTimestamp(), handleLastAttemptAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    return { handle: originalHandle, normalizedHandle: validation.normalizedHandle, idempotent: false };
+    transaction.set(targetRef, { uid, ownerUid: uid, originalHandle, normalizedHandle: validation.normalizedHandle, status: 'active', marketplaceClass: 'active_user', freeHandle: true, saleEligible: true, claimEligible: false, verificationRequired: false, previousHandle: profile.normalizedHandle || null, reservedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.set(profileRef, { ...(setup || {}), handle: originalHandle, normalizedHandle: validation.normalizedHandle, activeFreeHandle: validation.normalizedHandle, previousFreeHandle: profile.normalizedHandle || null, handleReservedAt: profile.handleReservedAt || FieldValue.serverTimestamp(), handleChangedAt: FieldValue.serverTimestamp(), handleLastAttemptAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.set(db.collection('handleTransfers').doc(), { type: 'free_handle_change', normalizedHandle: validation.normalizedHandle, previousHandle: profile.normalizedHandle || null, ownerUid: uid, requestId: requestRef.id, createdAt: FieldValue.serverTimestamp() });
+    transaction.set(db.collection('auditLogs').doc(), { system: 'portal_handle_risk', action: changing ? 'free_handle_changed' : 'free_handle_issued', actorUid: uid, normalizedHandle: validation.normalizedHandle, previousHandle: profile.normalizedHandle || null, riskBand: riskEvaluation.band, createdAt: FieldValue.serverTimestamp() });
+    return { handle: originalHandle, normalizedHandle: validation.normalizedHandle, status: 'approved', publicState: 'Approved', requestId: requestRef.id, idempotent: false };
   });
+  await recordRiskSignals(uid, requestRef.id, riskSignals);
+  return result;
 }
 
 export const checkHandleAvailability = onCall(async (request) => {
@@ -626,8 +736,8 @@ export const checkHandleAvailability = onCall(async (request) => {
   return handleAvailability(request.data?.handle || '');
 });
 
-export const reserveHandle = onCall(async (request) => claimHandle(requireAuth(request), request.data?.handle || '', false, profileSetup(request.data?.profile)));
-export const changeHandle = onCall(async (request) => claimHandle(requireAuth(request), request.data?.handle || '', true));
+export const reserveHandle = onCall(async (request) => claimHandle(request, requireAuth(request), request.data?.handle || '', false, profileSetup(request.data?.profile)));
+export const changeHandle = onCall(async (request) => claimHandle(request, requireAuth(request), request.data?.handle || '', true));
 
 export const resolveHandle = onCall(async (request) => {
   const requested = normalizeHandle(request.data?.handle || '');
@@ -691,10 +801,101 @@ export const getAdminHandleRecord = onCall(async (request) => {
   requirePortalAdmin(request);
   const normalizedHandle = normalizeHandle(request.data?.handle || '');
   if (!normalizedHandle) throw new HttpsError('invalid-argument', 'Enter a handle to search.');
-  const [handle, reserved, protectedHandle, policy, listings] = await Promise.all([
+  const [handle, reserved, protectedHandle, policy, listings, requests] = await Promise.all([
     db.collection('handles').doc(normalizedHandle).get(), db.collection('reservedHandles').doc(normalizedHandle).get(), db.collection('protectedHandles').doc(normalizedHandle).get(), db.collection('handlePolicies').doc(normalizedHandle).get(), db.collection('handleListings').doc(normalizedHandle).get(),
+    db.collection('handleRequests').where('normalizedHandle', '==', normalizedHandle).orderBy('createdAt', 'desc').limit(10).get(),
   ]);
-  return { normalizedHandle, handle: handle.exists ? handle.data() : null, reserved: reserved.exists ? reserved.data() : null, protected: protectedHandle.exists ? protectedHandle.data() : null, policy: policy.exists ? policy.data() : null, listing: listings.exists ? listings.data() : null };
+  return { normalizedHandle, handle: handle.exists ? handle.data() : null, reserved: reserved.exists ? reserved.data() : null, protected: protectedHandle.exists ? protectedHandle.data() : null, policy: policy.exists ? policy.data() : null, listing: listings.exists ? listings.data() : null, requests: requests.docs.map((item) => ({ id: item.id, ...item.data() })) };
+});
+
+export const requestPaidHandleReview = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const normalizedHandle = normalizeHandle(request.data?.handle || '');
+  const paymentReference = String(request.data?.paymentReference || '').trim().slice(0, 160);
+  if (!normalizedHandle || !paymentReference) throw new HttpsError('invalid-argument', 'Choose a handle and payment reference.');
+  const validation = validateHandle(normalizedHandle);
+  if (!validation.valid) throw new HttpsError('invalid-argument', validation.reason);
+  const [handleSnapshot, reservedSnapshot, protectedSnapshot, policySnapshot] = await Promise.all([
+    db.collection('handles').doc(validation.normalizedHandle).get(),
+    db.collection('reservedHandles').doc(validation.normalizedHandle).get(),
+    db.collection('protectedHandles').doc(validation.normalizedHandle).get(),
+    db.collection('handlePolicies').doc(validation.normalizedHandle).get(),
+  ]);
+  const policyDecision = registryDecision({ reserved: reservedSnapshot, protectedHandle: protectedSnapshot, policy: policySnapshot });
+  const profile = (await db.collection('users').doc(uid).get()).data() || {};
+  const riskSignals = await collectHandleRiskSignals(uid, request, validation.normalizedHandle, profile);
+  const riskEvaluation = evaluateHandleRisk({ uid, normalizedHandle: validation.normalizedHandle, signals: riskSignals });
+  const requestRef = db.collection('handleRequests').doc();
+  await requestRef.set({
+    requestId: requestRef.id,
+    uid,
+    normalizedHandle: validation.normalizedHandle,
+    requestType: 'paid',
+    status: 'pending_review',
+    approvalState: 'pending_review',
+    issuanceState: 'not_issued',
+    paymentState: 'paid_pending_review',
+    paymentReference,
+    targetPolicyState: !policyDecision.allowed ? policyDecision.state : handleSnapshot.exists ? handleSnapshot.data().status || 'owned' : 'normal',
+    riskScore: riskEvaluation.score,
+    riskBand: riskEvaluation.band,
+    riskReasons: riskEvaluation.reasons,
+    emailVerified: riskSignals.emailVerified,
+    phoneVerified: riskSignals.phoneVerified,
+    deviceMatchCount: riskSignals.deviceMatchCount,
+    browserMatchCount: riskSignals.browserMatchCount,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  await recordRiskSignals(uid, requestRef.id, riskSignals);
+  await db.collection('auditLogs').add({ system: 'portal_handle_risk', action: 'paid_handle_review_requested', actorUid: uid, normalizedHandle: validation.normalizedHandle, requestId: requestRef.id, riskBand: riskEvaluation.band, createdAt: FieldValue.serverTimestamp() });
+  return { requestId: requestRef.id, status: 'Pending Review' };
+});
+
+export const reviewHandleRequest = onCall(async (request) => {
+  const adminUid = requirePortalAdmin(request);
+  const requestId = String(request.data?.requestId || '');
+  const action = String(request.data?.action || '');
+  const notes = String(request.data?.notes || '').trim();
+  const alternativeHandle = request.data?.alternativeHandle ? normalizeHandle(request.data.alternativeHandle) : null;
+  if (!requestId || !['approve', 'reject', 'refund', 'offer_alternative', 'request_id', 'suspend_review', 'rescind_issued_handle', 'protect_handle'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a review request and valid action.');
+  if (!notes || notes.length < 6) throw new HttpsError('invalid-argument', 'Internal notes are required.');
+  const requestRef = db.collection('handleRequests').doc(requestId);
+  await db.runTransaction(async (transaction) => {
+    const requestSnapshot = await transaction.get(requestRef);
+    if (!requestSnapshot.exists) throw new HttpsError('not-found', 'Handle request not found.');
+    const item = requestSnapshot.data();
+    const handleRef = db.collection('handles').doc(item.normalizedHandle);
+    const profileRef = db.collection('users').doc(item.uid);
+    const update = { reviewedByUid: adminUid, reviewedAt: FieldValue.serverTimestamp(), internalNotes: notes, updatedAt: FieldValue.serverTimestamp() };
+    if (action === 'approve') {
+      const [handleSnapshot, profileSnapshot] = await Promise.all([transaction.get(handleRef), transaction.get(profileRef)]);
+      const ownerUid = handleSnapshot.data()?.ownerUid || handleSnapshot.data()?.uid || null;
+      if (ownerUid && ownerUid !== item.uid) throw new HttpsError('failed-precondition', 'Handle is already owned.');
+      transaction.set(handleRef, { uid: item.uid, ownerUid: item.uid, originalHandle: item.normalizedHandle, normalizedHandle: item.normalizedHandle, status: 'active', marketplaceClass: item.requestType === 'paid' ? 'user_owned' : 'active_user', freeHandle: item.requestType === 'free', saleEligible: true, reservedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      if (item.requestType === 'free') {
+        const previous = profileSnapshot.data()?.normalizedHandle;
+        if (previous && previous !== item.normalizedHandle) transaction.set(db.collection('handles').doc(previous), { uid: null, ownerUid: null, previousOwnerUid: item.uid, status: 'marketplace', marketplaceClass: 'marketplace', saleEligible: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(profileRef, { handle: item.normalizedHandle, normalizedHandle: item.normalizedHandle, activeFreeHandle: item.normalizedHandle, previousFreeHandle: previous || null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      }
+      Object.assign(update, { status: 'approved', approvalState: 'approved', issuanceState: 'issued' });
+    } else if (action === 'reject') Object.assign(update, { status: 'declined', approvalState: 'rejected', issuanceState: 'not_issued' });
+    else if (action === 'refund') Object.assign(update, { status: 'declined', approvalState: 'rejected', paymentState: 'refund_required', issuanceState: 'not_issued' });
+    else if (action === 'offer_alternative') Object.assign(update, { status: 'alternative_offered', approvalState: 'alternative_offered', alternativeHandle });
+    else if (action === 'request_id') Object.assign(update, { status: 'additional_verification_required', approvalState: 'identity_requested' });
+    else if (action === 'suspend_review') Object.assign(update, { status: 'suspended_review', approvalState: 'suspended' });
+    else if (action === 'rescind_issued_handle') {
+      transaction.set(handleRef, { uid: null, ownerUid: null, previousOwnerUid: item.uid, status: 'marketplace', marketplaceClass: 'marketplace', saleEligible: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(profileRef, { handle: FieldValue.delete(), normalizedHandle: FieldValue.delete(), activeFreeHandle: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      Object.assign(update, { status: 'rescinded', approvalState: 'rescinded', issuanceState: 'rescinded' });
+    } else if (action === 'protect_handle') {
+      transaction.set(db.collection('protectedHandles').doc(item.normalizedHandle), { normalizedHandle: item.normalizedHandle, displayHandle: `@${item.normalizedHandle}`, category: 'marketplace', status: 'protected', claimable: false, verificationRequired: true, transferable: false, marketplaceEligible: false, notes: 'Protected through risk review.', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      Object.assign(update, { status: 'protected', approvalState: 'protected', issuanceState: 'not_issued' });
+    }
+    transaction.set(requestRef, update, { merge: true });
+    transaction.set(db.collection('auditLogs').doc(), { system: 'portal_handle_risk', action: `handle_request_${action}`, actorUid: adminUid, requestId, normalizedHandle: item.normalizedHandle, notes, immutable: true, createdAt: FieldValue.serverTimestamp() });
+  });
+  return { requestId, action };
 });
 
 export const reclaimPortalHandle = onCall(async (request) => {

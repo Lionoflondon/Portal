@@ -88,6 +88,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /handleRequests/{requestId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /handleRiskSignals/{signalId} { allow read, write: if false; }
+
     match /marketplaceConfig/{configId} { allow read, write: if false; }
     match /auditLogs/{auditId} { allow read, write: if false; }
 

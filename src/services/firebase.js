@@ -345,3 +345,5 @@ export function submitPortalEventContribution(eventId, type, body, extra = {}) {
 export function getPortalAdminHandle(handle) { return callPortalIdentity('getAdminHandleRecord', { handle }); }
 export function managePortalHandleRegistry(payload) { return callPortalIdentity('managePortalHandleRegistry', payload); }
 export function reclaimPortalHandle(payload) { return callPortalIdentity('reclaimPortalHandle', payload); }
+export function requestPaidPortalHandleReview(handle, paymentReference, riskSignals = {}) { return callPortalIdentity('requestPaidHandleReview', { handle, paymentReference, riskSignals }); }
+export function reviewPortalHandleRequest(payload) { return callPortalIdentity('reviewHandleRequest', payload); }

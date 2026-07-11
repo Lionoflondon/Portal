@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HANDLE_CHANGE_COOLDOWN_MS, displayHandle, normalizeHandle, validateHandle } from './identity-engine.js';
+import { displayHandle, normalizeHandle, validateHandle } from './identity-engine.js';
 
 test('normalizes handles case-insensitively', () => {
   assert.equal(normalizeHandle('@Jason'), 'jason');
@@ -27,6 +27,6 @@ test('maps case variants to one atomic registry document key', () => {
   assert.equal(new Set([firstUserClaim, secondUserClaim]).size, 1);
 });
 
-test('uses a 30 day handle change cooldown', () => {
-  assert.equal(HANDLE_CHANGE_COOLDOWN_MS, 30 * 24 * 60 * 60 * 1000);
+test('free handle changes are not blocked by a fixed cooldown', () => {
+  assert.equal(validateHandle('new_handle').valid, true);
 });

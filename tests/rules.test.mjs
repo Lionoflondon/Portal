@@ -93,4 +93,16 @@ describe('Portal Firebase rules', () => {
     await assertFails(setDoc(doc(jason.firestore(), 'eventCandidates/client-candidate'), { title: 'Fake candidate' }));
     await assertFails(setDoc(doc(jason.firestore(), 'ingestionProviders/client-provider'), { enabled: true }));
   });
+
+  it('keeps handle anti-abuse state server-authoritative', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'handleRequests/request-1'), { uid: 'jason-risk', normalizedHandle: 'jason', status: 'pending_review', riskScore: 50, approvalState: 'pending_review', paymentState: 'not_required', issuanceState: 'not_issued' });
+    });
+    const jason = testEnv.authenticatedContext('jason-risk');
+    const maya = testEnv.authenticatedContext('maya-risk');
+    await assertSucceeds(getDoc(doc(jason.firestore(), 'handleRequests/request-1')));
+    await assertFails(getDoc(doc(maya.firestore(), 'handleRequests/request-1')));
+    await assertFails(setDoc(doc(jason.firestore(), 'handleRequests/request-1'), { riskScore: 0, approvalState: 'approved', issuanceState: 'issued' }, { merge: true }));
+    await assertFails(setDoc(doc(jason.firestore(), 'handleRiskSignals/device-1'), { kind: 'device', signature: 'abc', uid: 'jason-risk' }));
+  });
 });
