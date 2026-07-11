@@ -336,6 +336,18 @@ export function observeUserEchoes(uid, callback, onError) {
   return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'postEchoes'), where('echoingUid', '==', uid), where('status', '==', 'active'), orderBy('echoedAt', 'desc')), callback, onError);
 }
 
+export function observeUserPostLikes(uid, callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'postLikes'), where('uid', '==', uid), where('status', '==', 'active')), callback, onError);
+}
+
+export function observeUserPostBookmarks(uid, callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'postBookmarks'), where('uid', '==', uid), where('status', '==', 'active')), callback, onError);
+}
+
+export function observePostReplies(postId, callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'postReplies'), where('postId', '==', postId), where('visibility', '==', 'public'), orderBy('createdAt', 'asc')), callback, onError);
+}
+
 export function observePortalNotifications(uid, callback, onError) {
   return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'users', uid, 'notifications'), orderBy('createdAt', 'desc')), callback, onError);
 }
@@ -382,6 +394,9 @@ export function echoPortalPost(postId) { return callPortalIdentity('echoPortalPo
 export function undoPortalEcho(postId) { return callPortalIdentity('undoPortalEcho', { postId }); }
 export function createPortalQuoteEcho(postId, quoteText) { return callPortalIdentity('createPortalQuoteEcho', { postId, quoteText }); }
 export function createPortalPost(payload) { return callPortalIdentity('createPortalPost', typeof payload === 'string' ? { body: payload } : payload); }
+export function togglePortalPostLike(postId) { return callPortalIdentity('togglePostLike', { postId }); }
+export function togglePortalPostBookmark(postId) { return callPortalIdentity('togglePostBookmark', { postId }); }
+export function createPortalPostReply(postId, body) { return callPortalIdentity('createPostReply', { postId, body }); }
 export function deletePortalQuoteEcho(quoteEchoId) { return callPortalIdentity('deletePortalQuoteEcho', { quoteEchoId }); }
 export function submitPortalEventContribution(eventId, type, body, extra = {}) { return callPortalIdentity('submitEventContribution', { eventId, type, body, ...extra }); }
 export function getPortalAdminHandle(handle) { return callPortalIdentity('getAdminHandleRecord', { handle }); }

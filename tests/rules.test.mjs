@@ -85,6 +85,24 @@ describe('Portal Firebase rules', () => {
     await assertFails(updateDoc(doc(jason.firestore(), 'users/jason-notify/notifications/echo-1'), { postId: 'post-2' }));
   });
 
+  it('keeps likes, bookmarks and replies server-authoritative', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'postLikes/post-1_jason-social'), { postId: 'post-1', uid: 'jason-social', status: 'active', createdAt: new Date() });
+      await setDoc(doc(context.firestore(), 'postBookmarks/post-1_jason-social'), { postId: 'post-1', uid: 'jason-social', status: 'active', createdAt: new Date() });
+      await setDoc(doc(context.firestore(), 'postReplies/reply-1'), { postId: 'post-1', authorUid: 'jason-social', body: 'A real reply.', visibility: 'public', createdAt: new Date() });
+    });
+    const jason = testEnv.authenticatedContext('jason-social');
+    const maya = testEnv.authenticatedContext('maya-social');
+    await assertSucceeds(getDoc(doc(jason.firestore(), 'postLikes/post-1_jason-social')));
+    await assertFails(getDoc(doc(maya.firestore(), 'postLikes/post-1_jason-social')));
+    await assertSucceeds(getDoc(doc(jason.firestore(), 'postBookmarks/post-1_jason-social')));
+    await assertFails(getDoc(doc(maya.firestore(), 'postBookmarks/post-1_jason-social')));
+    await assertSucceeds(getDoc(doc(maya.firestore(), 'postReplies/reply-1')));
+    await assertFails(setDoc(doc(jason.firestore(), 'postLikes/post-2_jason-social'), { postId: 'post-2', uid: 'jason-social', status: 'active' }));
+    await assertFails(setDoc(doc(jason.firestore(), 'postBookmarks/post-2_jason-social'), { postId: 'post-2', uid: 'jason-social', status: 'active' }));
+    await assertFails(setDoc(doc(jason.firestore(), 'postReplies/reply-2'), { postId: 'post-1', authorUid: 'jason-social', body: 'Client write', visibility: 'public' }));
+  });
+
   it('keeps Global Event Engine records server-authoritative', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'eventTimeline/entry-1'), { eventId: 'event-1', entryType: 'event_detected', eventTimestamp: new Date(), ingestionTimestamp: new Date(), moderationState: 'approved' });

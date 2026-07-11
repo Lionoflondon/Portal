@@ -170,6 +170,21 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /postLikes/{likeId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /postBookmarks/{bookmarkId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /postReplies/{replyId} {
+      allow read: if signedIn() && resource.data.visibility == 'public';
+      allow write: if false;
+    }
+
     match /quoteEchoes/{quoteEchoId} {
       allow read: if signedIn() && (resource.data.visibility == 'public' || resource.data.quoteAuthorUid == request.auth.uid);
       allow write: if false;

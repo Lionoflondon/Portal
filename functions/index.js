@@ -260,6 +260,46 @@ export const undoPortalEcho = onCall(async (request) => {
   });
 });
 
+export const togglePostLike = onCall(async (request) => {
+  const uid = requireAuth(request); const postId = String(request.data?.postId || '');
+  if (!postId) throw new HttpsError('invalid-argument', 'Choose a Post to like.');
+  const postRef = db.collection('posts').doc(postId); const likeRef = db.collection('postLikes').doc(`${postId}_${uid}`);
+  return db.runTransaction(async (transaction) => {
+    const [postSnapshot, likeSnapshot] = await Promise.all([transaction.get(postRef), transaction.get(likeRef)]);
+    if (!postSnapshot.exists || !isEchoablePost(postSnapshot.data())) throw new HttpsError('failed-precondition', 'This Post is not available.');
+    const active = likeSnapshot.exists && likeSnapshot.data().status === 'active';
+    transaction.set(likeRef, { likeId: likeRef.id, postId, uid, status: active ? 'removed' : 'active', updatedAt: FieldValue.serverTimestamp(), createdAt: likeSnapshot.data()?.createdAt || FieldValue.serverTimestamp() }, { merge: true });
+    transaction.update(postRef, { likeCount: Math.max(0, Number(postSnapshot.data().likeCount || 0) + (active ? -1 : 1)), updatedAt: FieldValue.serverTimestamp() });
+    return { liked: !active };
+  });
+});
+
+export const togglePostBookmark = onCall(async (request) => {
+  const uid = requireAuth(request); const postId = String(request.data?.postId || '');
+  if (!postId) throw new HttpsError('invalid-argument', 'Choose a Post to bookmark.');
+  const postRef = db.collection('posts').doc(postId); const bookmarkRef = db.collection('postBookmarks').doc(`${postId}_${uid}`);
+  return db.runTransaction(async (transaction) => {
+    const [postSnapshot, bookmarkSnapshot] = await Promise.all([transaction.get(postRef), transaction.get(bookmarkRef)]);
+    if (!postSnapshot.exists || !isEchoablePost(postSnapshot.data())) throw new HttpsError('failed-precondition', 'This Post is not available.');
+    const active = bookmarkSnapshot.exists && bookmarkSnapshot.data().status === 'active';
+    transaction.set(bookmarkRef, { bookmarkId: bookmarkRef.id, postId, uid, status: active ? 'removed' : 'active', updatedAt: FieldValue.serverTimestamp(), createdAt: bookmarkSnapshot.data()?.createdAt || FieldValue.serverTimestamp() }, { merge: true });
+    return { bookmarked: !active };
+  });
+});
+
+export const createPostReply = onCall(async (request) => {
+  const uid = requireAuth(request); const postId = String(request.data?.postId || ''); const body = String(request.data?.body || '').trim();
+  if (!postId || body.length < 1 || body.length > 1000) throw new HttpsError('invalid-argument', 'Replies must be 1-1000 characters.');
+  const postRef = db.collection('posts').doc(postId); const replyRef = db.collection('postReplies').doc(); const profileSnapshot = await db.collection('users').doc(uid).get(); const profile = profileSnapshot.data() || {};
+  await db.runTransaction(async (transaction) => {
+    const postSnapshot = await transaction.get(postRef);
+    if (!postSnapshot.exists || !isEchoablePost(postSnapshot.data())) throw new HttpsError('failed-precondition', 'This Post is not available.');
+    transaction.set(replyRef, { replyId: replyRef.id, postId, body, authorUid: uid, authorHandle: profile.handle || profile.normalizedHandle || null, authorDisplayName: profile.displayName || null, visibility: 'public', moderationState: 'approved', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    transaction.update(postRef, { replyCount: Math.max(0, Number(postSnapshot.data().replyCount || 0) + 1), updatedAt: FieldValue.serverTimestamp() });
+  });
+  return { replyId: replyRef.id };
+});
+
 export const createPortalQuoteEcho = onCall(async (request) => {
   const quotingUid = requireAuth(request); const postId = String(request.data?.postId || ''); const quoteText = String(request.data?.quoteText || '').trim();
   if (!postId || quoteText.length < 1 || quoteText.length > 1000) throw new HttpsError('invalid-argument', 'Quote Echo commentary must be 1-1000 characters.');

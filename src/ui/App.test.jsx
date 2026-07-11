@@ -80,4 +80,28 @@ describe('Portal app shell', () => {
     expect(mediaBlock).toContain('Attached link');
     expect(mediaBlock).toContain('poll-option');
   });
+
+  it('uses an icon-only feed interaction bar with Echo copy only in the repost menu', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const postCardBlock = source.match(/function PostCard\([\s\S]*?\n}\n\nfunction Home/)?.[0] || '';
+    expect(postCardBlock).toContain('interaction-bar');
+    expect(postCardBlock).toContain("aria-label={liked ? 'Unlike' : 'Like'}");
+    expect(postCardBlock).toContain('aria-label="Reply"');
+    expect(postCardBlock).toContain('aria-label="Repost"');
+    expect(postCardBlock).toContain("aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark'}");
+    expect(postCardBlock).toContain('aria-label="Share"');
+    expect(postCardBlock).toContain('Share this post instantly with your followers.');
+    expect(postCardBlock).toContain('Share this post while adding your own thoughts.');
+    expect(postCardBlock).not.toContain('Undo Echo');
+    expect(postCardBlock).not.toContain('Quote Echo</button>');
+  });
+
+  it('opens Post detail for threaded replies and exact timestamps', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const detailBlock = source.match(/function PostDetail\([\s\S]*?\n}\n\nfunction EventForm/)?.[0] || '';
+    expect(detailBlock).toContain('observePostReplies');
+    expect(source).toContain('createPortalPostReply');
+    expect(detailBlock).toContain('Opened at');
+    expect(detailBlock).toContain('Reply to this Post');
+  });
 });
