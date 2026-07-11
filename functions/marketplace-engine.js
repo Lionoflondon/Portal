@@ -13,7 +13,7 @@ export function mayListHandle(handle = {}) {
 }
 
 export function mayBeginCheckout(listing) {
-  if (listing.disputeState || listing.status === 'disputed') return { allowed: false, reason: 'This listing is under review.' };
+  if (listing.disputeState || listing.status === 'disputed') return { allowed: false, reason: 'This listing is unavailable.' };
   if (listing.portalOwned) return { allowed: false, reason: 'Portal-owned checkout requires a configured payment provider.' };
   return thirdPartyHandleSalesEnabled ? { allowed: true } : { allowed: false, reason: 'Portal-managed checkout is being prepared. This handle cannot be transferred outside Portal.' };
 }
