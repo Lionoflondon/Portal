@@ -1004,15 +1004,41 @@ export const searchHandleMarketplace = onCall(async (request) => {
   if (!handle) return { listings: [] };
   const listing = await db.collection('handleListings').doc(handle).get();
   const registry = await db.collection('handles').doc(handle).get();
-  const [protectedHandle, reservedHandle, policy] = await Promise.all([db.collection('protectedHandles').doc(handle).get(), db.collection('reservedHandles').doc(handle).get(), db.collection('handlePolicies').doc(handle).get()]);
+  const [protectedHandle, reservedHandle, policy, listingMatches, handleMatches] = await Promise.all([
+    db.collection('protectedHandles').doc(handle).get(),
+    db.collection('reservedHandles').doc(handle).get(),
+    db.collection('handlePolicies').doc(handle).get(),
+    db.collection('handleListings').where('normalizedHandle', '>=', handle).where('normalizedHandle', '<=', `${handle}\uf8ff`).limit(12).get(),
+    db.collection('handles').where('normalizedHandle', '>=', handle).where('normalizedHandle', '<=', `${handle}\uf8ff`).limit(12).get(),
+  ]);
   const registryRecord = protectedHandle.exists ? protectedHandle.data() : reservedHandle.exists ? reservedHandle.data() : policy.exists ? policy.data() : null;
   const handleRecord = registry.exists ? registry.data() : registryRecord ? { ...registryRecord, normalizedHandle: handle, saleEligible: registryRecord.marketplaceEligible === true, marketplaceClass: registryRecord.category || 'protected' } : { normalizedHandle: handle, status: 'available', marketplaceClass: 'available', saleEligible: true };
   const listingRecord = listing.exists ? listing.data() : null;
   const state = marketplaceStateForHandle(handleRecord, listingRecord);
   const pricing = pricingForHandle(handle, handleRecord, listingRecord);
+  const listings = listingMatches.docs.map((item) => ({ listingId: item.id, ...item.data() }));
+  const ownedSuggestions = handleMatches.docs.map((item) => {
+    const record = item.data();
+    return {
+      normalizedHandle: record.normalizedHandle || item.id,
+      state: marketplaceStateForHandle(record, listings.find((listingItem) => listingItem.normalizedHandle === (record.normalizedHandle || item.id)) || null),
+      category: record.marketplaceClass || record.category || 'active_user',
+    };
+  });
+  const listingSuggestions = listings.map((item) => ({
+    normalizedHandle: item.normalizedHandle || item.listingId || item.id,
+    state: item.ownershipType === 'portal_owned' ? 'Premium' : 'Owned',
+    category: item.ownershipType || 'listed_by_owner',
+    askingPriceAmount: item.askingPriceAmount,
+    currency: item.currency || 'GBP',
+    listingStatus: item.listingStatus,
+  }));
+  const suggestions = [...new Map([...listingSuggestions, ...ownedSuggestions].map((item) => [item.normalizedHandle, item])).values()].slice(0, 12);
   return {
     handle: handleRecord,
     listing: listingRecord,
+    listings,
+    suggestions,
     state,
     pricing,
     details: {

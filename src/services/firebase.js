@@ -359,3 +359,11 @@ export function observeHandlePurchases(uid, callback, onError) {
     onError,
   );
 }
+
+export function observeHandleRequests(uid, callback, onError) {
+  return onSnapshot(
+    query(collection(requireService(portalDb, 'Firestore'), 'handleRequests'), where('uid', '==', uid), orderBy('createdAt', 'asc')),
+    callback,
+    onError,
+  );
+}

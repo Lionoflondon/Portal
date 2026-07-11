@@ -39,6 +39,10 @@ describe('Portal app shell', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const marketplaceBlock = source.match(/function HandleMarketplace\([\s\S]*?\n}\n\nfunction AdminHandleRegistry/)?.[0] || '';
     expect(marketplaceBlock).toContain('Reserve, discover and trade eligible Portal identities.');
+    expect(marketplaceBlock).toContain('Reserve your free handle');
+    expect(marketplaceBlock).toContain('Handle lifecycle');
+    expect(marketplaceBlock).toContain('Suggestions');
+    expect(marketplaceBlock).toContain('Your Requests');
     expect(marketplaceBlock).toContain('Development Payment Mode');
     expect(marketplaceBlock).toContain('Temporary Development Mode');
     expect(marketplaceBlock).toContain('Placeholder payment approved.');
