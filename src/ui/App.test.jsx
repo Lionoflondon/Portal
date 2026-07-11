@@ -88,24 +88,31 @@ describe('Portal app shell', () => {
     expect(mediaBlock).toContain('poll-option');
   });
 
-  it('uses an icon-only feed interaction bar with Echo copy only in the repost menu', () => {
+  it('uses a premium SVG feed interaction bar with Echo copy only in the menu', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const postCardBlock = source.match(/function PostCard\([\s\S]*?\n}\n\nfunction Home/)?.[0] || '';
+    const actionIconBlock = source.match(/function ActionIcon\([\s\S]*?\n}\n\nfunction PostCard/)?.[0] || '';
     expect(postCardBlock).toContain('interaction-bar');
-    expect(postCardBlock).toContain('❤️ <span>{post.likeCount || 0}</span>');
-    expect(postCardBlock).toContain('💬 <span>{post.replyCount || 0}</span>');
-    expect(postCardBlock).toContain('🔁 <span>{post.echoCount || 0}</span>');
-    expect(postCardBlock).toContain('🔖');
-    expect(postCardBlock).toContain('📤');
+    expect(actionIconBlock).toContain("name === 'like'");
+    expect(actionIconBlock).toContain("name === 'reply'");
+    expect(actionIconBlock).toContain("name === 'echo'");
+    expect(actionIconBlock).toContain("name === 'bookmark'");
+    expect(postCardBlock).toContain('<ActionIcon name="share" />');
+    expect(postCardBlock).toContain('interaction-label');
+    expect(postCardBlock).toContain('interaction-count');
     expect(postCardBlock).toContain("aria-label={liked ? 'Unlike' : 'Like'}");
     expect(postCardBlock).toContain('aria-label="Reply"');
-    expect(postCardBlock).toContain('aria-label="Repost"');
+    expect(postCardBlock).toContain('aria-label="Echo"');
     expect(postCardBlock).toContain("aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark'}");
     expect(postCardBlock).toContain('aria-label="Share"');
-    expect(postCardBlock).toContain('Share this post instantly with your followers.');
-    expect(postCardBlock).toContain('Share this post while adding your own thoughts.');
+    expect(postCardBlock).toContain('Re-share to your followers.');
+    expect(postCardBlock).toContain('Echo with comment');
+    expect(postCardBlock).toContain('Quote the post in a new post.');
+    expect(postCardBlock).toContain('Cancel');
+    expect(postCardBlock).not.toContain('❤️');
+    expect(postCardBlock).not.toContain('🔁 <span>');
+    expect(postCardBlock).not.toContain('📤');
     expect(postCardBlock).not.toContain('Undo Echo');
-    expect(postCardBlock).not.toContain('Quote Echo</button>');
     expect(postCardBlock).not.toContain('Echoes</span>');
     expect(postCardBlock).not.toContain('echoed</p>');
   });
