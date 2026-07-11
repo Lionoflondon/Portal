@@ -35,7 +35,9 @@ describe('Portal Admin authentication', () => {
     const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
     expect(entry).toContain("AdminApp from '@portal/admin/AdminApp.jsx'");
     expect(config).toContain("root: 'admin'");
+    expect(config).toContain('envDir: repoRoot');
     expect(config).toContain("outDir: '../dist-admin'");
+    expect(adminSource).toContain('if (!hasFirebaseConfig)');
     expect(adminSource).not.toContain('interaction-bar');
     expect(adminSource).not.toContain('Echo with comment');
     expect(adminSource).not.toContain('Bookmark');

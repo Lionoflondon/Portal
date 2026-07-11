@@ -141,14 +141,21 @@ export default function AdminApp() {
     return () => window.removeEventListener('hashchange', update);
   }, []);
 
-  useEffect(() => observeSession(async (nextUser) => {
+  useEffect(() => {
+    if (!hasFirebaseConfig) {
+      setUser(null);
+      setClaims(null);
+      return undefined;
+    }
+    return observeSession(async (nextUser) => {
     setUser(nextUser);
     setClaims(null);
     setError('');
     if (nextUser) {
       try { setClaims(await getPortalTokenClaims(nextUser)); } catch (reason) { setError(firebaseMessage(reason)); }
     }
-  }), []);
+    });
+  }, []);
 
   useEffect(() => {
     if (user === null && route !== '/login') window.location.hash = '#/login';
