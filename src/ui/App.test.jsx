@@ -85,6 +85,11 @@ describe('Portal app shell', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const postCardBlock = source.match(/function PostCard\([\s\S]*?\n}\n\nfunction Home/)?.[0] || '';
     expect(postCardBlock).toContain('interaction-bar');
+    expect(postCardBlock).toContain('❤️ <span>{post.likeCount || 0}</span>');
+    expect(postCardBlock).toContain('💬 <span>{post.replyCount || 0}</span>');
+    expect(postCardBlock).toContain('🔁 <span>{post.echoCount || 0}</span>');
+    expect(postCardBlock).toContain('🔖');
+    expect(postCardBlock).toContain('📤');
     expect(postCardBlock).toContain("aria-label={liked ? 'Unlike' : 'Like'}");
     expect(postCardBlock).toContain('aria-label="Reply"');
     expect(postCardBlock).toContain('aria-label="Repost"');
@@ -94,6 +99,8 @@ describe('Portal app shell', () => {
     expect(postCardBlock).toContain('Share this post while adding your own thoughts.');
     expect(postCardBlock).not.toContain('Undo Echo');
     expect(postCardBlock).not.toContain('Quote Echo</button>');
+    expect(postCardBlock).not.toContain('Echoes</span>');
+    expect(postCardBlock).not.toContain('echoed</p>');
   });
 
   it('opens Post detail for threaded replies and exact timestamps', () => {
