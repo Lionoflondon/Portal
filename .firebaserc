@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "portal-prod-f2308"
+  },
+  "targets": {
+    "portal-prod-f2308": {
+      "hosting": {
+        "portal": [
+          "portal-prod-f2308"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
