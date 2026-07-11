@@ -6,7 +6,7 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import { logger } from 'firebase-functions';
 import { entryIdFor, isEligibleForVortex, makeEntry, preferredEntryType } from './entry-engine.js';
 import { HANDLE_CHANGE_COOLDOWN_MS, HANDLE_REDIRECT_GRACE_MS, normalizeHandle, validateHandle } from './identity-engine.js';
-import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
+import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, PROTECTED_HANDLES, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
 
 initializeApp();
 setGlobalOptions({ region: 'europe-west2' });
@@ -188,7 +188,7 @@ export const searchHandleMarketplace = onCall(async (request) => {
   if (!handle) return { listings: [] };
   const listing = await db.collection('handleListings').doc(handle).get();
   const registry = await db.collection('handles').doc(handle).get();
-  return { handle: registry.exists ? registry.data() : { normalizedHandle: handle, status: 'available', marketplaceClass: 'available', saleEligible: true }, listing: listing.exists ? listing.data() : null };
+  return { handle: registry.exists ? registry.data() : PROTECTED_HANDLES.has(handle) ? { normalizedHandle: handle, status: 'protected', marketplaceClass: 'legacy_company', saleEligible: false, claimEligible: 'controlled_review_only', protectedReason: 'established organisation' } : { normalizedHandle: handle, status: 'available', marketplaceClass: 'available', saleEligible: true }, listing: listing.exists ? listing.data() : null };
 });
 
 export const createHandleListing = onCall(async (request) => {
