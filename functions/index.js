@@ -2,11 +2,13 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { setGlobalOptions } from 'firebase-functions/v2';
 import { logger } from 'firebase-functions';
 import { entryIdFor, isEligibleForVortex, makeEntry, preferredEntryType } from './entry-engine.js';
 import { HANDLE_CHANGE_COOLDOWN_MS, HANDLE_REDIRECT_GRACE_MS, normalizeHandle, validateHandle } from './identity-engine.js';
 
 initializeApp();
+setGlobalOptions({ region: 'europe-west2' });
 const db = getFirestore();
 
 async function countEventActivity(eventId) {
