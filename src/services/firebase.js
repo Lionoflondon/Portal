@@ -261,6 +261,29 @@ export function observeVortexEntries(callback, onError) {
   );
 }
 
+export function observePublicPosts(callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'posts'), where('visibility', '==', 'public'), orderBy('publishedAt', 'desc')), callback, onError);
+}
+
+export function observePost(postId, callback, onError) {
+  return onSnapshot(doc(requireService(portalDb, 'Firestore'), 'posts', postId), callback, onError);
+}
+
+export function observeUserEchoes(uid, callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'postEchoes'), where('echoingUid', '==', uid), where('status', '==', 'active'), orderBy('echoedAt', 'desc')), callback, onError);
+}
+
+export function observePortalNotifications(uid, callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'users', uid, 'notifications'), orderBy('createdAt', 'desc')), callback, onError);
+}
+
+export function markPortalNotificationRead(uid, notificationId) {
+  return updateDoc(doc(requireService(portalDb, 'Firestore'), 'users', uid, 'notifications', notificationId), {
+    read: true,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export function setVortexFollow(uid, eventId, following) {
   const reference = doc(requireService(portalDb, 'Firestore'), 'users', uid, 'vortex', eventId);
   return following
@@ -285,6 +308,11 @@ export function searchPortalHandleMarketplace(handle) { return callPortalIdentit
 export function createPortalHandleListing(handle, askingPriceAmount, currency = 'GBP') { return callPortalIdentity('createHandleListing', { handle, askingPriceAmount, currency }); }
 export function submitPortalHandleOffer(listingId, offerAmount) { return callPortalIdentity('submitHandleOffer', { listingId, offerAmount }); }
 export function openPortalHandleDispute(listingId) { return callPortalIdentity('openHandleDispute', { listingId }); }
+export function echoPortalPost(postId) { return callPortalIdentity('echoPortalPost', { postId }); }
+export function undoPortalEcho(postId) { return callPortalIdentity('undoPortalEcho', { postId }); }
+export function createPortalQuoteEcho(postId, quoteText) { return callPortalIdentity('createPortalQuoteEcho', { postId, quoteText }); }
+export function createPortalPost(body) { return callPortalIdentity('createPortalPost', { body }); }
+export function deletePortalQuoteEcho(quoteEchoId) { return callPortalIdentity('deletePortalQuoteEcho', { quoteEchoId }); }
 export function getPortalAdminHandle(handle) { return callPortalIdentity('getAdminHandleRecord', { handle }); }
 export function managePortalHandleRegistry(payload) { return callPortalIdentity('managePortalHandleRegistry', payload); }
 export function reclaimPortalHandle(payload) { return callPortalIdentity('reclaimPortalHandle', payload); }

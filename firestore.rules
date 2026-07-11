@@ -26,6 +26,14 @@ service cloud.firestore {
         allow read, write: if isOwner(uid);
       }
 
+      match /notifications/{notificationId} {
+        allow read: if isOwner(uid);
+        allow update: if isOwner(uid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'updatedAt'])
+          && request.resource.data.read == true;
+        allow create, delete: if false;
+      }
+
       match /private/{privateDocument=**} {
         allow read, write: if isOwner(uid);
       }
@@ -102,6 +110,16 @@ service cloud.firestore {
 
     match /posts/{postId} {
       allow read: if signedIn() && resource.data.visibility == 'public';
+      allow write: if false;
+    }
+
+    match /postEchoes/{echoId} {
+      allow read: if signedIn() && resource.data.echoingUid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /quoteEchoes/{quoteEchoId} {
+      allow read: if signedIn() && (resource.data.visibility == 'public' || resource.data.quoteAuthorUid == request.auth.uid);
       allow write: if false;
     }
 

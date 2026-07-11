@@ -8,6 +8,7 @@ import { entryIdFor, isEligibleForVortex, makeEntry, preferredEntryType } from '
 import { HANDLE_CHANGE_COOLDOWN_MS, HANDLE_REDIRECT_GRACE_MS, normalizeHandle, validateHandle } from './identity-engine.js';
 import { registryDecision, requiresElevatedReclaim } from './handle-registry.js';
 import { validateReclaimRequest } from './reclaim-policy.js';
+import { echoKey, echoNotificationId, isEchoablePost, nextEchoCount } from './echo-engine.js';
 import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
 
 initializeApp();
@@ -75,6 +76,76 @@ export const projectStandalonePost = onDocumentWritten('posts/{postId}', async (
   const entry = makeEntry({ type: 'Post', sourceId: postId, source: post });
   await db.collection('vortexEntries').doc(entry.entryId).set({ ...entry, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   logger.info('Projected standalone Portal post', { postId });
+});
+
+export const projectPortalQuoteEcho = onDocumentWritten('quoteEchoes/{quoteEchoId}', async (event) => {
+  const entryRef = db.collection('vortexEntries').doc(entryIdFor('Quote Echo', event.params.quoteEchoId));
+  if (!event.data?.after.exists || !isEligibleForVortex(event.data.after.data())) { await entryRef.delete(); return; }
+  const quote = event.data.after.data();
+  const entry = makeEntry({ type: 'Quote Echo', sourceId: event.params.quoteEchoId, source: { ...quote, title: quote.quoteText, body: quote.quoteText }, counts: { contributionCount: 1 } });
+  await entryRef.set({ ...entry, sourcePostId: quote.sourcePostId, originalAuthorUid: quote.originalAuthorUid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+});
+
+export const createPortalPost = onCall(async (request) => {
+  const uid = requireAuth(request); const body = String(request.data?.body || '').trim();
+  if (body.length < 1 || body.length > 2000) throw new HttpsError('invalid-argument', 'Posts must be 1-2000 characters.');
+  const profileSnapshot = await db.collection('users').doc(uid).get(); const profile = profileSnapshot.data() || {};
+  if (!profile.normalizedHandle) throw new HttpsError('failed-precondition', 'Choose your Portal handle before publishing a Post.');
+  const postRef = db.collection('posts').doc();
+  await postRef.set({ body, authorUid: uid, createdBy: uid, authorHandle: profile.handle, authorDisplayName: profile.displayName || null, visibility: 'public', moderationState: 'approved', draft: false, deleted: false, echoCount: 0, publishedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  return { postId: postRef.id };
+});
+
+function postAuthor(post = {}) { return post.authorUid || post.createdBy || null; }
+function postAttribution(post = {}) { return { originalAuthorUid: postAuthor(post), originalHandleSnapshot: post.authorHandle || post.handle || null, originalPublishedAt: post.publishedAt || post.createdAt || null }; }
+
+export const echoPortalPost = onCall(async (request) => {
+  const echoingUid = requireAuth(request); const postId = String(request.data?.postId || '');
+  if (!postId) throw new HttpsError('invalid-argument', 'Choose a Post to Echo.');
+  const postRef = db.collection('posts').doc(postId); const echoRef = db.collection('postEchoes').doc(echoKey(postId, echoingUid)); const actorRef = db.collection('users').doc(echoingUid);
+  const result = await db.runTransaction(async (transaction) => {
+    const [postSnapshot, echoSnapshot, actorSnapshot] = await Promise.all([transaction.get(postRef), transaction.get(echoRef), transaction.get(actorRef)]);
+    if (!postSnapshot.exists || !isEchoablePost(postSnapshot.data())) throw new HttpsError('failed-precondition', 'This Post is not available to Echo.');
+    const post = postSnapshot.data(); const originalAuthorUid = postAuthor(post); const actor = actorSnapshot.data() || {};
+    if (originalAuthorUid === echoingUid) throw new HttpsError('failed-precondition', 'You cannot Echo your own Post.');
+    if (echoSnapshot.exists && echoSnapshot.data().status === 'active') return { echoId: echoRef.id, echoed: true, idempotent: true };
+    transaction.set(echoRef, { echoId: echoRef.id, sourcePostId: postId, ...postAttribution(post), echoingUid, echoedAt: FieldValue.serverTimestamp(), status: 'active', visibility: 'public', createdAt: echoSnapshot.data()?.createdAt || FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.update(postRef, { echoCount: nextEchoCount(post.echoCount, 1), updatedAt: FieldValue.serverTimestamp() });
+    if (originalAuthorUid) transaction.set(db.collection('users').doc(originalAuthorUid).collection('notifications').doc(echoNotificationId(postId, echoingUid)), { type: 'echo', postId, echoId: echoRef.id, authorUid: echoingUid, authorHandle: actor.handle || actor.normalizedHandle || null, authorDisplayName: actor.displayName || null, sourceAuthorUid: originalAuthorUid, read: false, createdAt: FieldValue.serverTimestamp() }, { merge: true });
+    return { echoId: echoRef.id, echoed: true, idempotent: false };
+  });
+  return result;
+});
+
+export const undoPortalEcho = onCall(async (request) => {
+  const echoingUid = requireAuth(request); const postId = String(request.data?.postId || ''); const echoRef = db.collection('postEchoes').doc(echoKey(postId, echoingUid)); const postRef = db.collection('posts').doc(postId);
+  return db.runTransaction(async (transaction) => {
+    const [echoSnapshot, postSnapshot] = await Promise.all([transaction.get(echoRef), transaction.get(postRef)]);
+    if (!echoSnapshot.exists || echoSnapshot.data().status !== 'active') return { echoed: false, idempotent: true };
+    transaction.update(echoRef, { status: 'removed', removedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    if (postSnapshot.exists) transaction.update(postRef, { echoCount: nextEchoCount(postSnapshot.data().echoCount, -1), updatedAt: FieldValue.serverTimestamp() });
+    return { echoed: false, idempotent: false };
+  });
+});
+
+export const createPortalQuoteEcho = onCall(async (request) => {
+  const quotingUid = requireAuth(request); const postId = String(request.data?.postId || ''); const quoteText = String(request.data?.quoteText || '').trim();
+  if (!postId || quoteText.length < 1 || quoteText.length > 1000) throw new HttpsError('invalid-argument', 'Quote Echo commentary must be 1-1000 characters.');
+  const quoteRef = db.collection('quoteEchoes').doc(); const postRef = db.collection('posts').doc(postId); const actorRef = db.collection('users').doc(quotingUid);
+  const result = await db.runTransaction(async (transaction) => {
+    const [postSnapshot, actorSnapshot] = await Promise.all([transaction.get(postRef), transaction.get(actorRef)]); if (!postSnapshot.exists || !isEchoablePost(postSnapshot.data())) throw new HttpsError('failed-precondition', 'This Post is not available to Quote Echo.');
+    const post = postSnapshot.data(); const originalAuthorUid = postAuthor(post); const actor = actorSnapshot.data() || {}; if (originalAuthorUid === quotingUid) throw new HttpsError('failed-precondition', 'You cannot Quote Echo your own Post.');
+    transaction.set(quoteRef, { quoteEchoId: quoteRef.id, quoteAuthorUid: quotingUid, quoteText, sourcePostId: postId, ...postAttribution(post), moderationState: 'approved', visibility: 'public', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    if (originalAuthorUid) transaction.set(db.collection('users').doc(originalAuthorUid).collection('notifications').doc(`quoteEcho_${quoteRef.id}`), { type: 'quote_echo', postId, quoteEchoId: quoteRef.id, authorUid: quotingUid, authorHandle: actor.handle || actor.normalizedHandle || null, authorDisplayName: actor.displayName || null, sourceAuthorUid: originalAuthorUid, read: false, createdAt: FieldValue.serverTimestamp() }, { merge: true });
+    return { quoteEchoId: quoteRef.id };
+  });
+  return result;
+});
+
+export const deletePortalQuoteEcho = onCall(async (request) => {
+  const uid = requireAuth(request); const quoteRef = db.collection('quoteEchoes').doc(String(request.data?.quoteEchoId || ''));
+  await db.runTransaction(async (transaction) => { const snapshot = await transaction.get(quoteRef); if (!snapshot.exists) throw new HttpsError('not-found', 'Quote Echo not found.'); if (snapshot.data().quoteAuthorUid !== uid) throw new HttpsError('permission-denied', 'Only the Quote Echo author can delete it.'); transaction.update(quoteRef, { visibility: 'deleted', deletedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }); });
+  return { deleted: true };
 });
 
 function requireAuth(request) {

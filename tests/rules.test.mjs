@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 
 let testEnv;
@@ -58,5 +58,26 @@ describe('Portal Firebase rules', () => {
     await assertSucceeds(uploadBytes(ref(jason.storage(), 'event-media/event-1/jason/photo.jpg'), new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
     await assertFails(uploadBytes(ref(maya.storage(), 'event-media/event-1/jason/photo.jpg'), new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
     await assertFails(uploadBytes(ref(jason.storage(), 'event-media/event-1/jason/notes.txt'), new Uint8Array([1, 2]), { contentType: 'text/plain' }));
+  });
+
+  it('keeps Echo and Quote Echo writes server-authoritative', async () => {
+    const jason = testEnv.authenticatedContext('jason-echo');
+    const maya = testEnv.authenticatedContext('maya-echo');
+    await assertFails(setDoc(doc(jason.firestore(), 'postEchoes/post-1_jason-echo'), { sourcePostId: 'post-1', echoingUid: 'jason-echo', status: 'active' }));
+    await assertFails(setDoc(doc(jason.firestore(), 'quoteEchoes/quote-1'), { sourcePostId: 'post-1', quoteAuthorUid: 'jason-echo', visibility: 'public' }));
+    await assertFails(setDoc(doc(maya.firestore(), 'posts/post-1'), { authorUid: 'maya-echo', visibility: 'public' }));
+  });
+
+  it('keeps Echo notifications private and read-only except read state', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'users/jason-notify/notifications/echo-1'), { type: 'echo', postId: 'post-1', read: false, createdAt: new Date() });
+    });
+    const jason = testEnv.authenticatedContext('jason-notify');
+    const maya = testEnv.authenticatedContext('maya-notify');
+    await assertSucceeds(getDoc(doc(jason.firestore(), 'users/jason-notify/notifications/echo-1')));
+    await assertFails(getDoc(doc(maya.firestore(), 'users/jason-notify/notifications/echo-1')));
+    await assertFails(setDoc(doc(jason.firestore(), 'users/jason-notify/notifications/client-made'), { type: 'echo', read: false }));
+    await assertSucceeds(updateDoc(doc(jason.firestore(), 'users/jason-notify/notifications/echo-1'), { read: true, updatedAt: new Date() }));
+    await assertFails(updateDoc(doc(jason.firestore(), 'users/jason-notify/notifications/echo-1'), { postId: 'post-2' }));
   });
 });

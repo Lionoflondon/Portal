@@ -13,6 +13,23 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "visibility", "order": "ASCENDING" },
+        { "fieldPath": "publishedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "postEchoes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "echoingUid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "echoedAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
