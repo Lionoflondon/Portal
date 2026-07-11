@@ -44,6 +44,7 @@ describe('Portal Admin authentication', () => {
     const entry = readFileSync(resolve('admin/src/main.jsx'), 'utf8');
     const config = readFileSync(resolve('vite.admin.config.js'), 'utf8');
     const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
     expect(entry).toContain("AdminApp from '@portal/admin/AdminApp.jsx'");
     expect(config).toContain("root: 'admin'");
     expect(config).toContain('envDir: repoRoot');
@@ -53,5 +54,7 @@ describe('Portal Admin authentication', () => {
     expect(adminSource).not.toContain('Echo with comment');
     expect(adminSource).not.toContain('Bookmark');
     expect(adminSource).not.toContain('Share this post');
+    expect(styles).toContain('.admin-shell .form-stack select');
+    expect(styles).toContain('.admin-shell .form-stack select option');
   });
 });
