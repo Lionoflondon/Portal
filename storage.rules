@@ -22,5 +22,11 @@ service firebase.storage {
       allow create, update: if signedIn() && request.auth.uid == uid && validMedia();
       allow delete: if signedIn() && request.auth.uid == uid;
     }
+
+    match /post-media/{uid}/{draftId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid && validMedia();
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
   }
 }

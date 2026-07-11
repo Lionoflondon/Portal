@@ -56,4 +56,28 @@ describe('Portal app shell', () => {
     expect(profileBlock).toContain('#/marketplace?handle=');
     expect(profileBlock).not.toContain('Search handles');
   });
+
+  it('extends Publish Post with rich media controls', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const composerBlock = source.match(/function PostComposer\([\s\S]*?\n}\n\nfunction PostDetail/)?.[0] || '';
+    expect(composerBlock).toContain('Upload Photos');
+    expect(composerBlock).toContain('Upload Video');
+    expect(composerBlock).toContain('Emoji picker');
+    expect(composerBlock).toContain('Link attachment');
+    expect(composerBlock).toContain('Poll question');
+    expect(composerBlock).toContain('Topic / Hashtag selector');
+    expect(composerBlock).toContain('Optional location');
+    expect(composerBlock).toContain('Public');
+    expect(composerBlock).toContain('Followers');
+    expect(composerBlock).toContain('Private');
+  });
+
+  it('renders post media in shared Post cards', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const mediaBlock = source.match(/function PostMedia\([\s\S]*?\n}\n\nfunction PostCard/)?.[0] || '';
+    expect(mediaBlock).toContain('post-photo-grid');
+    expect(mediaBlock).toContain('post-video');
+    expect(mediaBlock).toContain('Attached link');
+    expect(mediaBlock).toContain('poll-option');
+  });
 });

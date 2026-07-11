@@ -208,6 +208,45 @@ function safeFileName(file) {
   return `${crypto.randomUUID()}${extension}`;
 }
 
+async function compressImage(file) {
+  if (!file.type.startsWith('image/') || file.size < 900 * 1024 || typeof document === 'undefined') return file;
+  const bitmap = await createImageBitmap(file);
+  const max = 1800;
+  const ratio = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * ratio);
+  canvas.height = Math.round(bitmap.height * ratio);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+  return blob ? new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }) : file;
+}
+
+function uploadPostFile(user, draftId, file, kind, onProgress) {
+  const path = `post-media/${user.uid}/${draftId}/${kind}-${safeFileName(file)}`;
+  const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, { contentType: file.type });
+  return new Promise((resolve, reject) => {
+    task.on('state_changed', (snapshot) => onProgress?.(kind, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
+      try { resolve({ url: await getDownloadURL(task.snapshot.ref), path, contentType: file.type, size: file.size }); } catch (error) { reject(error); }
+    });
+  });
+}
+
+export async function uploadPortalPostMedia(user, draftId, { photos = [], video = null }, onProgress) {
+  if (photos.length > 10) throw new Error('Posts support up to 10 photos.');
+  const preparedPhotos = [];
+  for (const [index, photo] of photos.entries()) {
+    if (!photo.type.startsWith('image/') || photo.size > 25 * 1024 * 1024) throw new Error('Photos must be image files under 25 MB.');
+    const compressed = await compressImage(photo);
+    preparedPhotos.push({ ...(await uploadPostFile(user, draftId, compressed, `photo-${index + 1}`, onProgress)), width: 0, height: 0 });
+  }
+  let preparedVideo = null;
+  if (video) {
+    if (!video.type.startsWith('video/') || video.size > 100 * 1024 * 1024) throw new Error('Videos must be video files under 100 MB.');
+    preparedVideo = await uploadPostFile(user, draftId, video, 'video', onProgress);
+  }
+  return { photos: preparedPhotos, video: preparedVideo };
+}
+
 function uploadEvidence(user, eventId, reportId, file, kind, onProgress) {
   if (!file) return Promise.resolve(null);
   const task = uploadBytesResumable(
@@ -342,7 +381,7 @@ export function openPortalHandleDispute(listingId) { return callPortalIdentity('
 export function echoPortalPost(postId) { return callPortalIdentity('echoPortalPost', { postId }); }
 export function undoPortalEcho(postId) { return callPortalIdentity('undoPortalEcho', { postId }); }
 export function createPortalQuoteEcho(postId, quoteText) { return callPortalIdentity('createPortalQuoteEcho', { postId, quoteText }); }
-export function createPortalPost(body) { return callPortalIdentity('createPortalPost', { body }); }
+export function createPortalPost(payload) { return callPortalIdentity('createPortalPost', typeof payload === 'string' ? { body: payload } : payload); }
 export function deletePortalQuoteEcho(quoteEchoId) { return callPortalIdentity('deletePortalQuoteEcho', { quoteEchoId }); }
 export function submitPortalEventContribution(eventId, type, body, extra = {}) { return callPortalIdentity('submitEventContribution', { eventId, type, body, ...extra }); }
 export function getPortalAdminHandle(handle) { return callPortalIdentity('getAdminHandleRecord', { handle }); }

@@ -198,10 +198,33 @@ export const projectPortalQuoteEcho = onDocumentWritten('quoteEchoes/{quoteEchoI
 export const createPortalPost = onCall(async (request) => {
   const uid = requireAuth(request); const body = String(request.data?.body || '').trim();
   if (body.length < 1 || body.length > 2000) throw new HttpsError('invalid-argument', 'Posts must be 1-2000 characters.');
+  const visibility = ['public', 'followers', 'private'].includes(String(request.data?.visibility || '').toLowerCase()) ? String(request.data.visibility).toLowerCase() : 'public';
+  const photos = Array.isArray(request.data?.photos) ? request.data.photos.slice(0, 10).map((item) => ({
+    url: String(item.url || ''),
+    path: String(item.path || ''),
+    contentType: String(item.contentType || ''),
+    width: Number(item.width || 0),
+    height: Number(item.height || 0),
+    size: Number(item.size || 0),
+  })).filter((item) => item.url.startsWith('https://') && item.path.startsWith(`post-media/${uid}/`) && item.contentType.startsWith('image/') && item.size <= 25 * 1024 * 1024) : [];
+  const videoInput = request.data?.video || null;
+  const video = videoInput && String(videoInput.url || '').startsWith('https://') && String(videoInput.path || '').startsWith(`post-media/${uid}/`) && String(videoInput.contentType || '').startsWith('video/') && Number(videoInput.size || 0) <= 100 * 1024 * 1024 ? {
+    url: String(videoInput.url),
+    path: String(videoInput.path),
+    thumbnailUrl: String(videoInput.thumbnailUrl || ''),
+    contentType: String(videoInput.contentType || ''),
+    size: Number(videoInput.size || 0),
+    duration: Number(videoInput.duration || 0),
+  } : null;
+  const link = request.data?.link?.url ? { url: String(request.data.link.url).slice(0, 500), title: String(request.data.link.title || '').slice(0, 120) } : null;
+  const pollOptions = Array.isArray(request.data?.poll?.options) ? request.data.poll.options.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 4) : [];
+  const poll = pollOptions.length >= 2 ? { question: String(request.data.poll.question || '').slice(0, 160), options: pollOptions.map((text, index) => ({ id: `option_${index + 1}`, text, votes: 0 })) } : null;
+  const topics = Array.isArray(request.data?.topics) ? request.data.topics.map((item) => String(item || '').replace(/^#/, '').trim().toLowerCase()).filter(Boolean).slice(0, 8) : [];
+  const location = request.data?.location ? String(request.data.location).trim().slice(0, 120) : null;
   const profileSnapshot = await db.collection('users').doc(uid).get(); const profile = profileSnapshot.data() || {};
   if (!profile.normalizedHandle) throw new HttpsError('failed-precondition', 'Choose your Portal handle before publishing a Post.');
   const postRef = db.collection('posts').doc();
-  await postRef.set({ body, authorUid: uid, createdBy: uid, authorHandle: profile.handle, authorDisplayName: profile.displayName || null, visibility: 'public', moderationState: 'approved', draft: false, deleted: false, echoCount: 0, publishedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  await postRef.set({ body, authorUid: uid, createdBy: uid, authorHandle: profile.handle, authorDisplayName: profile.displayName || null, visibility, moderationState: 'approved', draft: false, deleted: false, echoCount: 0, photos, video, link, poll, topics, location, media: { photoCount: photos.length, hasVideo: Boolean(video) }, publishedAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
   return { postId: postRef.id };
 });
 

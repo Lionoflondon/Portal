@@ -58,6 +58,10 @@ describe('Portal Firebase rules', () => {
     await assertSucceeds(uploadBytes(ref(jason.storage(), 'event-media/event-1/jason/photo.jpg'), new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
     await assertFails(uploadBytes(ref(maya.storage(), 'event-media/event-1/jason/photo.jpg'), new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
     await assertFails(uploadBytes(ref(jason.storage(), 'event-media/event-1/jason/notes.txt'), new Uint8Array([1, 2]), { contentType: 'text/plain' }));
+    await assertSucceeds(uploadBytes(ref(jason.storage(), 'post-media/jason/draft-1/photo.jpg'), new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
+    await assertSucceeds(uploadBytes(ref(jason.storage(), 'post-media/jason/draft-1/video.mp4'), new Uint8Array([1, 2]), { contentType: 'video/mp4' }));
+    await assertFails(uploadBytes(ref(maya.storage(), 'post-media/jason/draft-1/photo.jpg'), new Uint8Array([1, 2]), { contentType: 'image/jpeg' }));
+    await assertFails(uploadBytes(ref(jason.storage(), 'post-media/jason/draft-1/notes.txt'), new Uint8Array([1, 2]), { contentType: 'text/plain' }));
   });
 
   it('keeps Echo and Quote Echo writes server-authoritative', async () => {
