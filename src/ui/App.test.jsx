@@ -57,19 +57,21 @@ describe('Portal app shell', () => {
     expect(profileBlock).not.toContain('Search handles');
   });
 
-  it('extends Publish Post with rich media controls', () => {
+  it('polishes Publish Post into compact icon-driven panels', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const composerBlock = source.match(/function PostComposer\([\s\S]*?\n}\n\nfunction PostDetail/)?.[0] || '';
-    expect(composerBlock).toContain('Upload Photos');
-    expect(composerBlock).toContain('Upload Video');
-    expect(composerBlock).toContain('Emoji picker');
-    expect(composerBlock).toContain('Link attachment');
-    expect(composerBlock).toContain('Poll question');
-    expect(composerBlock).toContain('Topic / Hashtag selector');
-    expect(composerBlock).toContain('Optional location');
-    expect(composerBlock).toContain('Public');
-    expect(composerBlock).toContain('Followers');
-    expect(composerBlock).toContain('Private');
+    expect(composerBlock).toContain('composer-icon-row');
+    expect(composerBlock).toContain('aria-label="Media"');
+    expect(composerBlock).toContain('aria-label="Link"');
+    expect(composerBlock).toContain('aria-label="Poll"');
+    expect(composerBlock).toContain('aria-label="Location"');
+    expect(composerBlock).toContain('Upload photos');
+    expect(composerBlock).toContain('Upload video');
+    expect(composerBlock).toContain('Drag photos here');
+    expect(composerBlock).toContain('Auto title preview');
+    expect(composerBlock).toContain('Current location');
+    expect(composerBlock).not.toContain('Emoji picker');
+    expect(composerBlock).not.toContain('Topic / Hashtag selector');
   });
 
   it('renders post media in shared Post cards', () => {
