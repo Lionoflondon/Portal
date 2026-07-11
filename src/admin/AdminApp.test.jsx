@@ -16,6 +16,9 @@ describe('Portal Admin authentication', () => {
   it('renders the required login controls and denial state', () => {
     const source = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
     expect(source).toContain('Admin login');
+    expect(source).toContain('signInPortalUserWithGoogle');
+    expect(source).toContain('Continue with Google');
+    expect(source).toContain('or use email and password');
     expect(source).toContain('autoComplete="email"');
     expect(source).toContain('autoComplete="current-password"');
     expect(source).toContain('Show password');

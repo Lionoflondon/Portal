@@ -3,9 +3,11 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   getIdTokenResult,
+  GoogleAuthProvider,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   updatePassword,
   updateProfile,
@@ -76,6 +78,12 @@ export async function registerPortalUser({ displayName, email, password }) {
 
 export function signInPortalUser(email, password) {
   return signInWithEmailAndPassword(requireService(portalAuth, 'Authentication'), email, password);
+}
+
+export function signInPortalUserWithGoogle() {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  return signInWithPopup(requireService(portalAuth, 'Authentication'), provider);
 }
 
 export function signOutPortalUser() {
