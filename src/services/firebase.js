@@ -11,6 +11,8 @@ import {
 } from 'firebase/auth';
 import {
   addDoc,
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -23,6 +25,7 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
+  writeBatch,
   where,
   limit,
 } from 'firebase/firestore';
@@ -82,7 +85,7 @@ export function sendPortalPasswordReset(email) {
   return sendPasswordResetEmail(requireService(portalAuth, 'Authentication'), email);
 }
 
-export async function updatePortalProfile(user, { displayName, emailUpdates, bio, location, website, pronouns, profilePhotoUrl, bannerUrl }) {
+export async function updatePortalProfile(user, { displayName, emailUpdates, bio, location, website, pronouns, birthdayVisibility, profileVisibility, profilePhotoUrl, bannerUrl }) {
   if (displayName) await updateProfile(user, { displayName });
   await setDoc(doc(requireService(portalDb, 'Firestore'), 'users', user.uid), {
     ...(displayName ? { displayName } : {}),
@@ -91,6 +94,8 @@ export async function updatePortalProfile(user, { displayName, emailUpdates, bio
     ...(location === undefined ? {} : { location }),
     ...(website === undefined ? {} : { website }),
     ...(pronouns === undefined ? {} : { pronouns }),
+    ...(birthdayVisibility === undefined ? {} : { birthdayVisibility }),
+    ...(profileVisibility === undefined ? {} : { profileVisibility }),
     ...(profilePhotoUrl === undefined ? {} : { profilePhotoUrl }),
     ...(bannerUrl === undefined ? {} : { bannerUrl }),
     updatedAt: serverTimestamp(),
@@ -399,6 +404,8 @@ export async function sendPortalMessage(user, conversation, body, media = null) 
     senderUid: user.uid,
     body: text,
     media,
+    replyTo: conversation.replyTo || null,
+    linkPreview: extractLinkPreview(text),
     readBy: [user.uid],
     createdAt: serverTimestamp(),
   });
@@ -406,7 +413,59 @@ export async function sendPortalMessage(user, conversation, body, media = null) 
     lastMessage: text || (media?.type?.startsWith('image/') ? 'Photo' : 'Video'),
     lastMessageAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+    unreadBy: (conversation.participantUids || []).filter((uid) => uid !== user.uid),
   });
+}
+
+export async function updatePortalConversationState(user, conversationId, action) {
+  const updates = { updatedAt: serverTimestamp() };
+  if (action === 'pin') updates.pinnedBy = arrayUnion(user.uid);
+  if (action === 'unpin') updates.pinnedBy = arrayRemove(user.uid);
+  if (action === 'archive') updates.archivedBy = arrayUnion(user.uid);
+  if (action === 'delete') updates.deletedBy = arrayUnion(user.uid);
+  if (!['pin', 'unpin', 'archive', 'delete'].includes(action)) throw new Error('Unsupported conversation action.');
+  return updateDoc(doc(requireService(portalDb, 'Firestore'), 'messageConversations', conversationId), updates);
+}
+
+export function markPortalConversationRead(user, conversationId) {
+  return updateDoc(doc(requireService(portalDb, 'Firestore'), 'messageConversations', conversationId), {
+    unreadBy: arrayRemove(user.uid),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export function setPortalConversationTyping(user, conversationId, typing) {
+  return updateDoc(doc(requireService(portalDb, 'Firestore'), 'messageConversations', conversationId), {
+    typingUids: typing ? arrayUnion(user.uid) : arrayRemove(user.uid),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export function deleteOwnPortalMessage(user, conversationId, messageId) {
+  return updateDoc(doc(requireService(portalDb, 'Firestore'), 'messageConversations', conversationId, 'messages', messageId), {
+    body: 'Message deleted',
+    media: null,
+    deletedByUid: user.uid,
+    deletedAt: serverTimestamp(),
+  });
+}
+
+export async function markAllPortalNotificationsRead(uid, notifications) {
+  const db = requireService(portalDb, 'Firestore');
+  const batch = writeBatch(db);
+  notifications.filter((item) => !item.read).forEach((item) => batch.update(doc(db, 'users', uid, 'notifications', item.id), { read: true, updatedAt: serverTimestamp() }));
+  await batch.commit();
+}
+
+function extractLinkPreview(text) {
+  const url = text.match(/https?:\/\/[^\s]+/i)?.[0];
+  if (!url) return null;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    return { url, title: host, description: 'Link shared in Portal Messages' };
+  } catch {
+    return null;
+  }
 }
 
 export function uploadPortalMessageMedia(user, conversationId, file, onProgress) {

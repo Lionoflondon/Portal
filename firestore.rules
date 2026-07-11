@@ -24,7 +24,7 @@ service cloud.firestore {
       allow read, delete: if isOwner(uid);
       allow update: if isOwner(uid)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['displayName', 'preferences', 'profilePhotoUrl', 'bannerUrl', 'bio', 'location', 'website', 'pronouns', 'updatedAt']);
+          .hasOnly(['displayName', 'preferences', 'profilePhotoUrl', 'bannerUrl', 'bio', 'location', 'website', 'pronouns', 'birthdayVisibility', 'profileVisibility', 'updatedAt']);
 
       match /vortex/{privateDocument=**} {
         allow read, write: if isOwner(uid);
@@ -203,13 +203,25 @@ service cloud.firestore {
           'updatedAt',
           'createdAt',
           'pinned',
+          'pinnedBy',
+          'archivedBy',
+          'deletedBy',
           'unreadBy',
           'typingUids'
         ]);
       allow update: if signedIn()
         && request.auth.uid in resource.data.participantUids
         && request.resource.data.participantUids == resource.data.participantUids
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'updatedAt']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'lastMessage',
+          'lastMessageAt',
+          'updatedAt',
+          'pinnedBy',
+          'archivedBy',
+          'deletedBy',
+          'unreadBy',
+          'typingUids'
+        ]);
       allow delete: if false;
 
       match /messages/{messageId} {
@@ -217,8 +229,12 @@ service cloud.firestore {
         allow create: if signedIn()
           && request.auth.uid in get(/databases/$(database)/documents/messageConversations/$(conversationId)).data.participantUids
           && request.resource.data.senderUid == request.auth.uid
-          && request.resource.data.keys().hasOnly(['senderUid', 'body', 'media', 'readBy', 'createdAt']);
-        allow update, delete: if false;
+          && request.resource.data.keys().hasOnly(['senderUid', 'body', 'media', 'replyTo', 'linkPreview', 'readBy', 'createdAt']);
+        allow update: if signedIn()
+          && resource.data.senderUid == request.auth.uid
+          && request.resource.data.senderUid == resource.data.senderUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body', 'media', 'deletedByUid', 'deletedAt']);
+        allow delete: if false;
       }
     }
 
