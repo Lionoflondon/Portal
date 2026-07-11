@@ -11,10 +11,15 @@ import {
   signInPortalUser,
   signOutPortalUser,
 } from '../services/firebase.js';
-
-const SUPER_ADMIN_EMAIL = 'ayojason600@gmail.com';
+import { isAdminUser } from './auth.js';
 
 function firebaseMessage(reason) {
+  const code = reason?.code || '';
+  if (code.includes('auth/invalid-credential') || code.includes('auth/wrong-password')) return 'Incorrect email or password.';
+  if (code.includes('auth/user-not-found')) return 'No Portal Admin account exists for that email.';
+  if (code.includes('auth/too-many-requests')) return 'Too many attempts. Reset your password or try again later.';
+  if (code.includes('auth/invalid-email')) return 'Enter a valid email address.';
+  if (code.includes('auth/network-request-failed')) return 'Network error. Check your connection and try again.';
   return reason?.message?.replace('Firebase: ', '') || 'Something went wrong. Please try again.';
 }
 
@@ -41,14 +46,10 @@ function timeLabel(value) {
   return date ? date.toLocaleDateString() : 'Not set';
 }
 
-function isAdminUser(user, claims = {}) {
-  const email = user?.email?.toLowerCase();
-  return email === SUPER_ADMIN_EMAIL || claims.portalAdmin === true || claims.admin === true || claims.custodian === true;
-}
-
 function AdminLogin() {
-  const [email, setEmail] = useState(SUPER_ADMIN_EMAIL);
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -61,14 +62,14 @@ function AdminLogin() {
 
   async function reset() {
     setBusy(true); setNotice(''); setError('');
-    try { await sendPortalPasswordReset(email.trim() || SUPER_ADMIN_EMAIL); setNotice('Password setup/reset email sent.'); } catch (reason) { setError(firebaseMessage(reason)); } finally { setBusy(false); }
+    try { await sendPortalPasswordReset(email.trim()); setNotice('Password reset email sent.'); } catch (reason) { setError(firebaseMessage(reason)); } finally { setBusy(false); }
   }
 
-  return <main className="auth-shell"><section className="auth-panel"><Brand /><div><h1 className="display-xl">Admin login</h1><p className="body-md">Portal Admin is restricted to authorised staff.</p></div>{!hasFirebaseConfig ? <p className="form-error">Firebase environment configuration is missing.</p> : <form className="form-stack" onSubmit={login}><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>{error ? <p className="form-error" role="alert">{error}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<button className="btn btn-primary" disabled={busy || !email.trim() || !password}>{busy ? 'Signing in...' : 'Sign in'}</button><button className="btn btn-secondary" type="button" onClick={reset} disabled={busy || !email.trim()}>Send password setup/reset email</button></form>}</section></main>;
+  return <main className="auth-shell"><section className="auth-panel"><Brand /><div><h1 className="display-xl">Admin login</h1><p className="body-md">Portal Admin is restricted to authorised staff.</p></div>{!hasFirebaseConfig ? <p className="form-error">Firebase environment configuration is missing.</p> : <form className="form-stack" onSubmit={login}><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Password<span className="password-field"><input type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /><button type="button" className="password-toggle" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? 'Hide' : 'Show'}</button></span></label>{error ? <p className="form-error" role="alert">{error}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<button className="btn btn-primary" disabled={busy || !email.trim() || !password}>{busy ? 'Signing in...' : 'Sign in'}</button><button className="btn btn-secondary" type="button" onClick={reset} disabled={busy || !email.trim()}>Forgotten password</button></form>}</section></main>;
 }
 
 function AccessDenied({ user }) {
-  return <main className="auth-shell"><section className="auth-panel"><Brand /><Avatar>{initials(user?.displayName || user?.email)}</Avatar><div><h1 className="display-xl">Access denied</h1><p className="body-md">This account is not authorised for Portal Admin.</p></div><button className="btn btn-secondary" type="button" onClick={() => signOutPortalUser()}>Sign out</button></section></main>;
+  return <main className="auth-shell"><section className="auth-panel"><Brand /><Avatar>{initials(user?.displayName || user?.email)}</Avatar><div><h1 className="display-xl">Access denied</h1><p className="body-md">This account is not authorised for Portal Admin.</p><p className="body-sm">Signed in as {user?.email || 'unknown account'}.</p></div><button className="btn btn-secondary" type="button" onClick={() => signOutPortalUser()}>Sign out</button></section></main>;
 }
 
 function AdminHandleRegistry() {
@@ -157,6 +158,6 @@ export default function AdminApp() {
   if (!user || route === '/login') return <AdminLogin />;
   if (error) return <main className="auth-shell"><section className="auth-panel"><Brand /><p className="form-error">{error}</p><button className="btn btn-secondary" type="button" onClick={() => signOutPortalUser()}>Sign out</button></section></main>;
   if (!claims) return <main className="auth-shell"><section className="auth-panel"><Brand /><p className="body-md">Checking admin authority...</p></section></main>;
-  if (!isAdminUser(user, claims)) return <AccessDenied user={user} />;
+  if (!isAdminUser(claims)) return <AccessDenied user={user} />;
   return <AdminWorkspace current={route} user={user} />;
 }
