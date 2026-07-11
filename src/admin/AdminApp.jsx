@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  changePortalPassword,
   getPortalAdminHandle,
   getPortalTokenClaims,
   hasFirebaseConfig,
@@ -78,6 +79,36 @@ function AccessDenied({ user }) {
   return <main className="auth-shell"><section className="auth-panel"><Brand /><Avatar>{initials(user?.displayName || user?.email)}</Avatar><div><h1 className="display-xl">Access denied</h1><p className="body-md">This account is not authorised for Portal Admin.</p><p className="body-sm">Signed in as {user?.email || 'unknown account'}.</p></div><button className="btn btn-secondary" type="button" onClick={() => signOutPortalUser()}>Sign out</button></section></main>;
 }
 
+function AdminPasswordPanel() {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+
+  async function save(event) {
+    event.preventDefault();
+    setNotice(''); setError('');
+    if (password.length < 8) { setError('Use at least 8 characters.'); return; }
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    setBusy(true);
+    try {
+      await changePortalPassword(password);
+      setPassword('');
+      setConfirm('');
+      setNotice('Password changed.');
+    } catch (reason) {
+      const code = reason?.code || '';
+      setError(code.includes('auth/requires-recent-login') ? 'Please sign out and sign in again before changing your password.' : firebaseMessage(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="glass card"><h2 className="display-md">Account security</h2><form className="form-stack" onSubmit={save}><label>New password<span className="password-field"><input type={show ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /><button type="button" className="password-toggle" onClick={() => setShow((visible) => !visible)} aria-label={show ? 'Hide password' : 'Show password'}>{show ? 'Hide' : 'Show'}</button></span></label><label>Confirm password<input type={show ? 'text' : 'password'} value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" /></label>{error ? <p className="form-error" role="alert">{error}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<button className="btn btn-primary" disabled={busy || !password || !confirm}>{busy ? 'Changing...' : 'Change password'}</button></form></section>;
+}
+
 function AdminHandleRegistry() {
   const [term, setTerm] = useState('');
   const [record, setRecord] = useState(null);
@@ -132,7 +163,7 @@ function AdminHandleRegistry() {
 
 function AdminWorkspace({ current, user }) {
   const handles = current === '/handles' || current === '/admin/handles';
-  return <main className="admin-shell"><header className="admin-topbar"><Brand /><div><span className="eyebrow">Staff only</span><strong>Portal administration</strong></div><span className="body-sm">{user.email}</span><button className="btn btn-secondary btn-sm" type="button" onClick={() => signOutPortalUser()}>Sign out</button></header><div className="admin-layout"><nav className="admin-nav" aria-label="Portal administration"><a href="#/" aria-current={!handles ? 'page' : undefined}>Overview</a><a href="#/handles" aria-current={handles ? 'page' : undefined}>Handle Registry</a></nav><section className="admin-content">{handles ? <AdminHandleRegistry /> : <div className="page"><div><h1 className="display-xl">Portal administration</h1><p className="body-md">Controlled operational surfaces for Portal staff.</p></div><section className="glass card"><h2 className="display-md">Handle Registry</h2><p className="body-sm">Search, classify and reclaim protected Portal identities. Server functions enforce admin authority.</p><a className="btn btn-primary" href="#/handles">Open Handle Registry</a></section></div>}</section></div></main>;
+  return <main className="admin-shell"><header className="admin-topbar"><Brand /><div><span className="eyebrow">Staff only</span><strong>Portal administration</strong></div><span className="body-sm">{user.email}</span><button className="btn btn-secondary btn-sm" type="button" onClick={() => signOutPortalUser()}>Sign out</button></header><div className="admin-layout"><nav className="admin-nav" aria-label="Portal administration"><a href="#/" aria-current={!handles ? 'page' : undefined}>Overview</a><a href="#/handles" aria-current={handles ? 'page' : undefined}>Handle Registry</a></nav><section className="admin-content">{handles ? <AdminHandleRegistry /> : <div className="page"><div><h1 className="display-xl">Portal administration</h1><p className="body-md">Controlled operational surfaces for Portal staff.</p></div><section className="glass card"><h2 className="display-md">Handle Registry</h2><p className="body-sm">Search, classify and reclaim protected Portal identities. Server functions enforce admin authority.</p><a className="btn btn-primary" href="#/handles">Open Handle Registry</a></section><AdminPasswordPanel /></div>}</section></div></main>;
 }
 
 export default function AdminApp() {

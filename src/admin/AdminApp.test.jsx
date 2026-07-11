@@ -24,6 +24,11 @@ describe('Portal Admin authentication', () => {
     expect(source).toContain('Show password');
     expect(source).toContain('Hide password');
     expect(source).toContain('Forgotten password');
+    expect(source).toContain('function AdminPasswordPanel');
+    expect(source).toContain('changePortalPassword');
+    expect(source).toContain('Account security');
+    expect(source).toContain('Change password');
+    expect(source).toContain('Passwords do not match.');
     expect(source).toContain('Incorrect email or password.');
     expect(source).toContain('Restoring admin session...');
     expect(source).toContain('Checking admin authority...');
