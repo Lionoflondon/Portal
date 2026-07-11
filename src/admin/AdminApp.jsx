@@ -165,10 +165,11 @@ export default function AdminApp() {
 
   useEffect(() => {
     if (user === null && route !== '/login') window.location.hash = '#/login';
-  }, [user, route]);
+    if (user && claims && isAdminUser(claims) && route === '/login') window.location.hash = '#/';
+  }, [user, claims, route]);
 
   if (user === undefined) return <main className="auth-shell"><section className="auth-panel"><Brand /><p className="body-md">Restoring admin session...</p></section></main>;
-  if (!user || route === '/login') return <AdminLogin />;
+  if (!user) return <AdminLogin />;
   if (error) return <main className="auth-shell"><section className="auth-panel"><Brand /><p className="form-error">{error}</p><button className="btn btn-secondary" type="button" onClick={() => signOutPortalUser()}>Sign out</button></section></main>;
   if (!claims) return <main className="auth-shell"><section className="auth-panel"><Brand /><p className="body-md">Checking admin authority...</p></section></main>;
   if (!isAdminUser(claims)) return <AccessDenied user={user} />;

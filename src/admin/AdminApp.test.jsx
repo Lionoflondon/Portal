@@ -27,6 +27,9 @@ describe('Portal Admin authentication', () => {
     expect(source).toContain('Incorrect email or password.');
     expect(source).toContain('Restoring admin session...');
     expect(source).toContain('Checking admin authority...');
+    expect(source).toContain("route === '/login'");
+    expect(source).toContain("window.location.hash = '#/'");
+    expect(source).not.toContain("!user || route === '/login'");
     expect(source).toContain('Access denied');
     expect(source).toContain('Signed in as');
     expect(source).toContain('Sign out');
