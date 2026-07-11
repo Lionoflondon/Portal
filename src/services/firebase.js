@@ -21,10 +21,11 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  Timestamp,
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
+import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -155,6 +156,67 @@ export function createPortalReport(user, eventId, values) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+}
+
+function safeFileName(file) {
+  const extension = file.name.includes('.') ? `.${file.name.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '')}` : '';
+  return `${crypto.randomUUID()}${extension}`;
+}
+
+function uploadEvidence(user, eventId, reportId, file, kind, onProgress) {
+  if (!file) return Promise.resolve(null);
+  const task = uploadBytesResumable(
+    ref(requireService(portalStorage, 'Storage'), `event-media/${eventId}/${user.uid}/${reportId}-${kind}-${safeFileName(file)}`),
+    file,
+    { contentType: file.type },
+  );
+  return new Promise((resolve, reject) => {
+    task.on('state_changed', (snapshot) => onProgress?.(kind, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
+      try { resolve(await getDownloadURL(task.snapshot.ref)); } catch (error) { reject(error); }
+    });
+  });
+}
+
+export async function publishPortalReport(user, values, onProgress) {
+  const db = requireService(portalDb, 'Firestore');
+  let eventId = values.eventId;
+  if (!eventId) {
+    const event = await addDoc(collection(db, 'events'), {
+      title: values.eventTitle.trim(),
+      summary: values.description.trim(),
+      status: 'Developing',
+      parentEventId: null,
+      archived: false,
+      createdBy: user.uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    eventId = event.id;
+  }
+  const report = await addDoc(collection(db, 'events', eventId, 'reports'), {
+    title: values.title.trim(),
+    body: values.description.trim(),
+    location: values.location.trim() || null,
+    occurredAt: values.occurredAt ? Timestamp.fromDate(new Date(values.occurredAt)) : null,
+    sourceType: values.identityMode === 'Casual' ? 'Community' : 'Eyewitness',
+    identityMode: values.identityMode,
+    media: {},
+    createdBy: user.uid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  try {
+    const [photoUrl, videoUrl] = await Promise.all([
+      uploadEvidence(user, eventId, report.id, values.photo, 'photo', onProgress),
+      uploadEvidence(user, eventId, report.id, values.video, 'video', onProgress),
+    ]);
+    await updateDoc(report, { media: { ...(photoUrl ? { photoUrl } : {}), ...(videoUrl ? { videoUrl } : {}) }, updatedAt: serverTimestamp() });
+    await updateDoc(doc(db, 'events', eventId), { updatedAt: serverTimestamp() });
+    return { eventId, reportId: report.id };
+  } catch (error) {
+    await updateDoc(report, { uploadFailed: true, updatedAt: serverTimestamp() });
+    throw error;
+  }
 }
 
 export function observeVortex(uid, callback, onError) {
