@@ -65,13 +65,18 @@ describe('Portal app shell', () => {
     expect(composerBlock).toContain('aria-label="Link"');
     expect(composerBlock).toContain('aria-label="Poll"');
     expect(composerBlock).toContain('aria-label="Location"');
-    expect(composerBlock).toContain('Upload photos');
-    expect(composerBlock).toContain('Upload video');
-    expect(composerBlock).toContain('Drag photos here');
+    expect(composerBlock).toContain('id="post-media-picker"');
+    expect(composerBlock).toContain('accept="image/*,video/*"');
+    expect(composerBlock).toContain('pickMediaFiles');
+    expect(composerBlock).toContain('compact-media-preview');
     expect(composerBlock).toContain('Auto title preview');
     expect(composerBlock).toContain('Current location');
+    expect(composerBlock).not.toContain('Upload photos');
+    expect(composerBlock).not.toContain('Upload video');
+    expect(composerBlock).not.toContain('Drag photos here');
     expect(composerBlock).not.toContain('Emoji picker');
     expect(composerBlock).not.toContain('Topic / Hashtag selector');
+    expect(composerBlock).not.toContain('Visibility');
   });
 
   it('renders post media in shared Post cards', () => {
