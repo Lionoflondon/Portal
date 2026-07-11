@@ -42,6 +42,8 @@ function Avatar({ children, size = 'md' }) { return <span className={`avatar siz
 function timeLabel(value) { return value?.toDate ? value.toDate().toLocaleDateString() : 'Now'; }
 function firebaseMessage(error) { return error?.message?.replace('Firebase: ', '') || 'Something went wrong. Please try again.'; }
 
+export const EVENTS_UNAVAILABLE_MESSAGE = 'Events are temporarily unavailable. Please try again shortly.';
+
 function Brand() { return <a href="#/" className="brand" aria-label="Portal home"><span className="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="#fff" strokeWidth="2" strokeLinecap="round" /><circle cx="12" cy="12" r="4" stroke="#fff" strokeWidth="2" /></svg></span><span className="brand-name desktop-only">Portal</span></a>; }
 function NavLink({ route, current }) { return <a href={`#${route.path}`} className="nav-item" aria-current={current === route.path ? 'page' : undefined}><Icon name={route.icon} /><span>{route.label}</span></a>; }
 
@@ -67,7 +69,7 @@ function EventCollection({ events, loading, error, empty, onFollow, following = 
 }
 
 function Home({ eventState, onFollow, following }) {
-  return <div className="page"><div className="welcome-head"><div><h1 className="display-xl">Humanity&apos;s living memory</h1><p className="body-md">Reports become evidence. Conversations become context. Events become connected memory.</p></div></div><Section title="Events happening now" link="#/events"><EventCollection {...eventState} empty="No events yet" onFollow={onFollow} following={following} /></Section><Section title="Your Vortex" link="#/vortex"><div className="glass card empty-state"><div className="icon-wrap"><Icon name="vortex" /></div><h2 className="display-md">Follow the connections</h2><p className="body-sm">Your saved events become a personal path through Portal&apos;s universe.</p></div></Section></div>;
+  return <div className="page"><div className="welcome-head"><div><h1 className="display-xl">Humanity&apos;s living memory</h1><p className="body-md">Reports become evidence. Conversations become context. Events become connected memory.</p></div></div><Section title="Events happening now" link="#/events"><EventCollection {...eventState} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="No events yet" onFollow={onFollow} following={following} /></Section><Section title="Your Vortex" link="#/vortex"><div className="glass card empty-state"><div className="icon-wrap"><Icon name="vortex" /></div><h2 className="display-md">Follow the connections</h2><p className="body-sm">Your saved events become a personal path through Portal&apos;s universe.</p></div></Section></div>;
 }
 
 function EventForm({ initial, events, onSubmit, onCancel, busy }) {
@@ -80,7 +82,7 @@ function EventForm({ initial, events, onSubmit, onCancel, busy }) {
 function Events({ user, eventState, onFollow, following, onCreate }) {
   const [filter, setFilter] = useState('All');
   const filtered = filter === 'All' ? eventState.events : eventState.events.filter((event) => event.status === filter);
-  return <div className="page"><div className="welcome-head"><div><h1 className="display-xl">Events</h1><p className="body-md">Real happenings, organised by evidence, status and relationship.</p></div><button type="button" className="btn btn-primary" onClick={onCreate}>Create event</button></div><Section title="Status"><div className="chip-row">{['All', ...eventStatuses].map((status) => <button type="button" className={`chip ${filter === status ? 'active' : ''}`} onClick={() => setFilter(status)} key={status}>{status}</button>)}</div></Section><Section title="Events"><EventCollection events={filtered} loading={eventState.loading} error={eventState.error} empty="No matching events" onFollow={onFollow} following={following} /></Section><p className="body-sm">Signed in as {user.email}</p></div>;
+  return <div className="page"><div className="welcome-head"><div><h1 className="display-xl">Events</h1><p className="body-md">Real happenings, organised by evidence, status and relationship.</p></div><button type="button" className="btn btn-primary" onClick={onCreate}>Create event</button></div><Section title="Status"><div className="chip-row">{['All', ...eventStatuses].map((status) => <button type="button" className={`chip ${filter === status ? 'active' : ''}`} onClick={() => setFilter(status)} key={status}>{status}</button>)}</div></Section><Section title="Events"><EventCollection events={filtered} loading={eventState.loading} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="No matching events" onFollow={onFollow} following={following} /></Section><p className="body-sm">Signed in as {user.email}</p></div>;
 }
 
 function EventDetail({ eventId, user, events, onFollow, following }) {
