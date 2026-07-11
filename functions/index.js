@@ -134,7 +134,7 @@ export const createPortalQuoteEcho = onCall(async (request) => {
   const quoteRef = db.collection('quoteEchoes').doc(); const postRef = db.collection('posts').doc(postId); const actorRef = db.collection('users').doc(quotingUid);
   const result = await db.runTransaction(async (transaction) => {
     const [postSnapshot, actorSnapshot] = await Promise.all([transaction.get(postRef), transaction.get(actorRef)]); if (!postSnapshot.exists || !isEchoablePost(postSnapshot.data())) throw new HttpsError('failed-precondition', 'This Post is not available to Quote Echo.');
-    const post = postSnapshot.data(); const originalAuthorUid = postAuthor(post); const actor = actorSnapshot.data() || {}; if (originalAuthorUid === quotingUid) throw new HttpsError('failed-precondition', 'You cannot Quote Echo your own Post.');
+    const post = postSnapshot.data(); const originalAuthorUid = postAuthor(post); const actor = actorSnapshot.data() || {};
     transaction.set(quoteRef, { quoteEchoId: quoteRef.id, quoteAuthorUid: quotingUid, quoteText, sourcePostId: postId, ...postAttribution(post), moderationState: 'approved', visibility: 'public', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     if (originalAuthorUid) transaction.set(db.collection('users').doc(originalAuthorUid).collection('notifications').doc(`quoteEcho_${quoteRef.id}`), { type: 'quote_echo', postId, quoteEchoId: quoteRef.id, authorUid: quotingUid, authorHandle: actor.handle || actor.normalizedHandle || null, authorDisplayName: actor.displayName || null, sourceAuthorUid: originalAuthorUid, read: false, createdAt: FieldValue.serverTimestamp() }, { merge: true });
     return { quoteEchoId: quoteRef.id };
