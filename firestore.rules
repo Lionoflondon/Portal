@@ -35,6 +35,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /protectedHandles/{handle} { allow read, write: if false; }
+    match /reservedHandles/{handle} { allow read, write: if false; }
+    match /handlePolicies/{policyId} { allow read, write: if false; }
+
     match /publicProfiles/{uid} {
       allow read: if true;
       allow write: if false;

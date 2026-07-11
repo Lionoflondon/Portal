@@ -285,3 +285,6 @@ export function searchPortalHandleMarketplace(handle) { return callPortalIdentit
 export function createPortalHandleListing(handle, askingPriceAmount, currency = 'GBP') { return callPortalIdentity('createHandleListing', { handle, askingPriceAmount, currency }); }
 export function submitPortalHandleOffer(listingId, offerAmount) { return callPortalIdentity('submitHandleOffer', { listingId, offerAmount }); }
 export function openPortalHandleDispute(listingId) { return callPortalIdentity('openHandleDispute', { listingId }); }
+export function getPortalAdminHandle(handle) { return callPortalIdentity('getAdminHandleRecord', { handle }); }
+export function managePortalHandleRegistry(payload) { return callPortalIdentity('managePortalHandleRegistry', payload); }
+export function reclaimPortalHandle(payload) { return callPortalIdentity('reclaimPortalHandle', payload); }

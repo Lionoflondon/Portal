@@ -11,6 +11,7 @@
     "test:vortex": "node --test functions/entry-engine.test.js",
     "test:identity": "node --test functions/identity-engine.test.js",
     "test:marketplace": "node --test functions/marketplace-engine.test.js",
+    "seed:protected-handles": "node functions/scripts/seed-protected-handles.js",
     "test:rules": "firebase emulators:exec --project portal-prod-f2308 --only firestore,storage \"vitest run tests/rules.test.mjs\"",
     "preview": "vite preview"
   },

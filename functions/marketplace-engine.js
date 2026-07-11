@@ -1,6 +1,5 @@
 export const thirdPartyHandleSalesEnabled = false;
 export const PORTAL_COMMISSION_BPS = 1000;
-export const PROTECTED_HANDLES = new Set(['bbc']);
 
 export function calculateCommission(grossAmountMinor) {
   if (!Number.isSafeInteger(grossAmountMinor) || grossAmountMinor <= 0) throw new Error('Sale amount must be a positive integer in minor units.');
@@ -9,7 +8,7 @@ export function calculateCommission(grossAmountMinor) {
 }
 
 export function mayListHandle(handle = {}) {
-  return handle.status === 'active' && handle.saleEligible !== false && !PROTECTED_HANDLES.has(handle.normalizedHandle);
+  return handle.status === 'active' && handle.saleEligible !== false && handle.marketplaceClass !== 'protected';
 }
 
 export function mayBeginCheckout(listing) {

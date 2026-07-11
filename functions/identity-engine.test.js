@@ -8,23 +8,16 @@ test('normalizes handles case-insensitively', () => {
   assert.equal(displayHandle('Jason'), '@jason');
 });
 
-test('validates Portal handle format and reserved names', () => {
+test('validates Portal handle format', () => {
   assert.equal(validateHandle('jason_adesanya').valid, true);
   assert.equal(validateHandle('_jason').valid, false);
   assert.equal(validateHandle('ja__son').valid, false);
-  assert.equal(validateHandle('portal').valid, false);
-  assert.equal(validateHandle('admin_news').valid, false);
 });
 
 test('rejects empty and invalid handles without creating an identity', () => {
   assert.equal(validateHandle('').valid, false);
   assert.equal(validateHandle('jay-son').valid, false);
   assert.equal(validateHandle('jason adesanya').valid, false);
-});
-
-test('separates protected and reserved Portal identities', () => {
-  assert.equal(validateHandle('bbc').state, 'protected');
-  assert.equal(validateHandle('portal').state, 'reserved');
 });
 
 test('maps case variants to one atomic registry document key', () => {

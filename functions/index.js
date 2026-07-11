@@ -6,7 +6,9 @@ import { setGlobalOptions } from 'firebase-functions/v2';
 import { logger } from 'firebase-functions';
 import { entryIdFor, isEligibleForVortex, makeEntry, preferredEntryType } from './entry-engine.js';
 import { HANDLE_CHANGE_COOLDOWN_MS, HANDLE_REDIRECT_GRACE_MS, normalizeHandle, validateHandle } from './identity-engine.js';
-import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, PROTECTED_HANDLES, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
+import { registryDecision, requiresElevatedReclaim } from './handle-registry.js';
+import { validateReclaimRequest } from './reclaim-policy.js';
+import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
 
 initializeApp();
 setGlobalOptions({ region: 'europe-west2' });
@@ -83,8 +85,13 @@ function requireAuth(request) {
 async function handleAvailability(value) {
   const validation = validateHandle(value);
   if (!validation.valid) return { available: false, state: validation.state || 'invalid', reason: validation.reason };
-  const active = await db.collection('handles').doc(validation.normalizedHandle).get();
-  if (!active.exists) return { available: true, state: 'available', normalizedHandle: validation.normalizedHandle };
+  const [active, reserved, protectedHandle, policy] = await Promise.all([
+    db.collection('handles').doc(validation.normalizedHandle).get(),
+    db.collection('reservedHandles').doc(validation.normalizedHandle).get(),
+    db.collection('protectedHandles').doc(validation.normalizedHandle).get(),
+    db.collection('handlePolicies').doc(validation.normalizedHandle).get(),
+  ]);
+  if (!active.exists) { const decision = registryDecision({ reserved, protectedHandle, policy }); return { available: decision.allowed, state: decision.state, reason: decision.reason, normalizedHandle: validation.normalizedHandle }; }
   const handle = active.data();
   const state = handle.status === 'protected' || handle.saleEligible === false ? 'protected' : handle.status === 'redirect' || handle.status === 'reserved' ? 'reserved' : 'taken';
   return { available: false, state, normalizedHandle: validation.normalizedHandle };
@@ -110,10 +117,16 @@ async function claimHandle(uid, requestedHandle, changing = false, setup = null)
   const now = Date.now();
   const profileRef = db.collection('users').doc(uid);
   const targetRef = db.collection('handles').doc(validation.normalizedHandle);
+  const reservedRef = db.collection('reservedHandles').doc(validation.normalizedHandle);
+  const protectedRef = db.collection('protectedHandles').doc(validation.normalizedHandle);
+  const policyRef = db.collection('handlePolicies').doc(validation.normalizedHandle);
   return db.runTransaction(async (transaction) => {
-    const [profileSnapshot, targetSnapshot] = await Promise.all([transaction.get(profileRef), transaction.get(targetRef)]);
+    const [profileSnapshot, targetSnapshot, reservedSnapshot, protectedSnapshot, policySnapshot] = await Promise.all([transaction.get(profileRef), transaction.get(targetRef), transaction.get(reservedRef), transaction.get(protectedRef), transaction.get(policyRef)]);
     const profile = profileSnapshot.data() || {};
-    if (targetSnapshot.exists && targetSnapshot.data().uid !== uid) throw new HttpsError('already-exists', 'That handle was just taken. Please choose another.');
+    const existingOwnerUid = targetSnapshot.data()?.ownerUid || targetSnapshot.data()?.uid || null;
+    if (existingOwnerUid && existingOwnerUid !== uid) throw new HttpsError('already-exists', 'That handle was just taken. Please choose another.');
+    const decision = registryDecision({ reserved: reservedSnapshot, protectedHandle: protectedSnapshot, policy: policySnapshot, now });
+    if (!decision.allowed) throw new HttpsError('failed-precondition', decision.reason);
     if (profile.normalizedHandle === validation.normalizedHandle) return { handle: profile.handle, normalizedHandle: profile.normalizedHandle, idempotent: true };
     const lastAttempt = profile.handleLastAttemptAt?.toMillis?.() || 0;
     if (now - lastAttempt < 5_000) throw new HttpsError('resource-exhausted', 'Try that again in a moment.');
@@ -190,6 +203,98 @@ function requirePortalAdmin(request) {
   return uid;
 }
 
+function requireElevatedPortalAdmin(request, category) {
+  const uid = requirePortalAdmin(request);
+  if (requiresElevatedReclaim(category) && request.auth.token.portalHandleSuperAdmin !== true) throw new HttpsError('permission-denied', 'Elevated Portal administration is required for this handle category.');
+  return uid;
+}
+
+export const getAdminHandleRecord = onCall(async (request) => {
+  requirePortalAdmin(request);
+  const normalizedHandle = normalizeHandle(request.data?.handle || '');
+  if (!normalizedHandle) throw new HttpsError('invalid-argument', 'Enter a handle to search.');
+  const [handle, reserved, protectedHandle, policy, listings] = await Promise.all([
+    db.collection('handles').doc(normalizedHandle).get(), db.collection('reservedHandles').doc(normalizedHandle).get(), db.collection('protectedHandles').doc(normalizedHandle).get(), db.collection('handlePolicies').doc(normalizedHandle).get(), db.collection('handleListings').doc(normalizedHandle).get(),
+  ]);
+  return { normalizedHandle, handle: handle.exists ? handle.data() : null, reserved: reserved.exists ? reserved.data() : null, protected: protectedHandle.exists ? protectedHandle.data() : null, policy: policy.exists ? policy.data() : null, listing: listings.exists ? listings.data() : null };
+});
+
+export const reclaimPortalHandle = onCall(async (request) => {
+  const normalizedHandle = normalizeHandle(request.data?.handle || '');
+  const reason = request.data?.reason;
+  const notes = String(request.data?.notes || '').trim();
+  const outcome = request.data?.outcome;
+  const claimantUid = request.data?.claimantUid || null;
+  const linkedCaseId = request.data?.linkedCaseId || null;
+  if (!validateReclaimRequest({ handle: normalizedHandle, reason, notes, outcome, confirmation: request.data?.confirmation })) throw new HttpsError('invalid-argument', 'Provide a handle, reason, internal notes, typed confirmation and a valid outcome.');
+  const handleRef = db.collection('handles').doc(normalizedHandle);
+  const protectedRef = db.collection('protectedHandles').doc(normalizedHandle);
+  const reservedRef = db.collection('reservedHandles').doc(normalizedHandle);
+  const policyRef = db.collection('handlePolicies').doc(normalizedHandle);
+  const globalRef = db.collection('handlePolicies').doc('_config');
+  const result = await db.runTransaction(async (transaction) => {
+    const [handleSnapshot, protectedSnapshot, reservedSnapshot, globalSnapshot] = await Promise.all([transaction.get(handleRef), transaction.get(protectedRef), transaction.get(reservedRef), transaction.get(globalRef)]);
+    const current = handleSnapshot.data() || {};
+    const registry = protectedSnapshot.data() || reservedSnapshot.data() || current;
+    const adminUid = requireElevatedPortalAdmin(request, registry.category || current.marketplaceClass || 'marketplace');
+    if (requiresElevatedReclaim(registry.category || current.marketplaceClass || 'marketplace') && request.data?.highRiskConfirmed !== true) throw new HttpsError('failed-precondition', 'Confirm this high-risk reclaim separately.');
+    const previousOwnerUid = current.ownerUid || current.uid || null;
+    const previousProfileRef = previousOwnerUid ? db.collection('users').doc(previousOwnerUid) : null;
+    const claimantRef = claimantUid ? db.collection('users').doc(claimantUid) : null;
+    const [previousProfile, claimantProfile] = await Promise.all([previousProfileRef ? transaction.get(previousProfileRef) : Promise.resolve(null), claimantRef ? transaction.get(claimantRef) : Promise.resolve(null)]);
+    if (['assign_verified_claimant', 'assign_portal_account'].includes(outcome) && (!claimantUid || !claimantProfile?.exists)) throw new HttpsError('not-found', 'The receiving Portal account could not be found.');
+    const reclaimRef = db.collection('handleTransfers').doc();
+    const auditRef = db.collection('auditLogs').doc();
+    const notificationRef = previousOwnerUid ? db.collection('users').doc(previousOwnerUid).collection('notifications').doc(`handle_reclaim_${reclaimRef.id}`) : null;
+    const days = Number(globalSnapshot.data()?.reclaimCoolingOffDays || 30);
+    const availableAfter = new Date(Date.now() + Math.max(1, days) * 24 * 60 * 60 * 1000);
+    if (previousProfile?.exists && previousProfile.data().normalizedHandle === normalizedHandle) transaction.update(previousProfileRef, { handle: FieldValue.delete(), normalizedHandle: FieldValue.delete(), handleChangedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    if (outcome === 'assign_verified_claimant' || outcome === 'assign_portal_account') {
+      transaction.set(handleRef, { normalizedHandle, originalHandle: normalizedHandle, ownerUid: claimantUid, uid: claimantUid, previousOwnerUid, status: 'verified_owner', marketplaceClass: outcome === 'assign_portal_account' ? 'portal_owned' : 'user_owned', saleEligible: false, claimEligible: false, currentListingId: null, lastTransferredAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(claimantRef, { handle: normalizedHandle, normalizedHandle, handleReservedAt: FieldValue.serverTimestamp(), handleChangedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    } else if (outcome === 'return_to_marketplace') {
+      transaction.set(handleRef, { normalizedHandle, originalHandle: normalizedHandle, ownerUid: null, uid: null, previousOwnerUid, status: 'marketplace', marketplaceClass: 'marketplace', saleEligible: true, claimEligible: false, currentListingId: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(policyRef, { normalizedHandle, status: 'marketplace', category: 'marketplace', marketplaceEligible: true, transferable: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    } else if (outcome === 'release_to_availability') {
+      transaction.set(handleRef, { normalizedHandle, originalHandle: normalizedHandle, ownerUid: null, uid: null, previousOwnerUid, status: 'available', marketplaceClass: 'available', saleEligible: true, currentListingId: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(policyRef, { normalizedHandle, status: 'available', availableAfter, marketplaceEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    } else {
+      const permanent = outcome === 'permanently_reserve';
+      const record = { normalizedHandle, displayHandle: `@${normalizedHandle}`, category: registry.category || 'marketplace', status: permanent ? 'reserved' : 'protected', claimable: !permanent, verificationRequired: true, transferable: false, marketplaceEligible: false, notes: 'Registry state applied through admin reclaim.', updatedAt: FieldValue.serverTimestamp() };
+      transaction.set(permanent ? reservedRef : protectedRef, record, { merge: true });
+      transaction.set(handleRef, { normalizedHandle, originalHandle: normalizedHandle, ownerUid: null, uid: null, previousOwnerUid, status: record.status, marketplaceClass: record.category, saleEligible: false, claimEligible: record.claimable, currentListingId: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    transaction.set(reclaimRef, { transferId: reclaimRef.id, type: 'admin_reclaim', handleId: normalizedHandle, normalizedHandle, previousOwnerUid, actingAdminUid: adminUid, reason, outcome, linkedCaseId, createdAt: FieldValue.serverTimestamp() });
+    transaction.set(auditRef, { system: 'portal_handle_registry', action: 'handle_reclaimed', actorUid: adminUid, normalizedHandle, previousOwnerUid, previousHandle: normalizedHandle, reason, notes, outcome, linkedCaseId, immutable: true, createdAt: FieldValue.serverTimestamp() });
+    if (notificationRef) transaction.set(notificationRef, { type: 'handle_reclaimed', normalizedHandle, reason, appealRoute: '#/settings', createdAt: FieldValue.serverTimestamp() });
+    return { normalizedHandle, outcome, previousOwnerUid };
+  });
+  return result;
+});
+
+export const managePortalHandleRegistry = onCall(async (request) => {
+  const adminUid = requirePortalAdmin(request);
+  const normalizedHandle = normalizeHandle(request.data?.handle || '');
+  const action = request.data?.action;
+  const category = String(request.data?.category || 'marketplace');
+  if (!normalizedHandle || !['reserve', 'protect', 'release', 'retire', 'marketplace', 'verify_owner'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a handle and valid registry action.');
+  if (requiresElevatedReclaim(category) && request.auth.token.portalHandleSuperAdmin !== true) throw new HttpsError('permission-denied', 'Elevated Portal administration is required for this category.');
+  const handleRef = db.collection('handles').doc(normalizedHandle); const reservedRef = db.collection('reservedHandles').doc(normalizedHandle); const protectedRef = db.collection('protectedHandles').doc(normalizedHandle); const policyRef = db.collection('handlePolicies').doc(normalizedHandle);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(handleRef); const ownerUid = snapshot.data()?.ownerUid || snapshot.data()?.uid || null;
+    if (action === 'reserve' || action === 'protect') transaction.set(action === 'reserve' ? reservedRef : protectedRef, { normalizedHandle, displayHandle: `@${normalizedHandle}`, category, status: action === 'reserve' ? 'reserved' : 'protected', claimable: action === 'protect', verificationRequired: action === 'protect', transferable: false, marketplaceEligible: false, notes: String(request.data?.notes || ''), createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    if (action === 'release') transaction.set(policyRef, { normalizedHandle, status: 'available', marketplaceEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    if (action === 'retire') transaction.set(policyRef, { normalizedHandle, status: 'retired', marketplaceEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    if (action === 'marketplace') transaction.set(policyRef, { normalizedHandle, status: 'marketplace', category: 'marketplace', marketplaceEligible: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    if (action === 'verify_owner') {
+      const verifiedUid = request.data?.verifiedUid; if (!verifiedUid) throw new HttpsError('invalid-argument', 'Choose the verified owner.');
+      transaction.set(handleRef, { normalizedHandle, ownerUid: verifiedUid, uid: verifiedUid, previousOwnerUid: ownerUid, status: 'verified_owner', marketplaceClass: 'user_owned', saleEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    transaction.set(db.collection('auditLogs').doc(), { system: 'portal_handle_registry', action: `registry_${action}`, actorUid: adminUid, normalizedHandle, category, immutable: true, createdAt: FieldValue.serverTimestamp() });
+  });
+  return { normalizedHandle, action };
+});
+
 function validMoney(value) {
   if (!Number.isSafeInteger(value) || value <= 0) throw new HttpsError('invalid-argument', 'Price must be a positive integer in minor units.');
   return value;
@@ -205,7 +310,9 @@ export const searchHandleMarketplace = onCall(async (request) => {
   if (!handle) return { listings: [] };
   const listing = await db.collection('handleListings').doc(handle).get();
   const registry = await db.collection('handles').doc(handle).get();
-  return { handle: registry.exists ? registry.data() : PROTECTED_HANDLES.has(handle) ? { normalizedHandle: handle, status: 'protected', marketplaceClass: 'legacy_company', saleEligible: false, claimEligible: 'controlled_review_only', protectedReason: 'established organisation' } : { normalizedHandle: handle, status: 'available', marketplaceClass: 'available', saleEligible: true }, listing: listing.exists ? listing.data() : null };
+  const [protectedHandle, reservedHandle, policy] = await Promise.all([db.collection('protectedHandles').doc(handle).get(), db.collection('reservedHandles').doc(handle).get(), db.collection('handlePolicies').doc(handle).get()]);
+  const registryRecord = protectedHandle.exists ? protectedHandle.data() : reservedHandle.exists ? reservedHandle.data() : policy.exists ? policy.data() : null;
+  return { handle: registry.exists ? registry.data() : registryRecord ? { ...registryRecord, normalizedHandle: handle, saleEligible: registryRecord.marketplaceEligible === true, marketplaceClass: registryRecord.category || 'protected' } : { normalizedHandle: handle, status: 'available', marketplaceClass: 'available', saleEligible: true }, listing: listing.exists ? listing.data() : null };
 });
 
 export const createHandleListing = onCall(async (request) => {
