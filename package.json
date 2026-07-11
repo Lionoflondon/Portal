@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:admin": "vite build --config vite.admin.config.js",
     "lint": "eslint .",
     "test": "vitest run src",
     "test:vortex": "node --test functions/entry-engine.test.js",
@@ -13,7 +14,8 @@
     "test:marketplace": "node --test functions/marketplace-engine.test.js",
     "seed:protected-handles": "node functions/scripts/seed-protected-handles.js",
     "test:rules": "firebase emulators:exec --project portal-prod-f2308 --only firestore,storage \"vitest run tests/rules.test.mjs\"",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:admin": "vite preview --outDir dist-admin"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

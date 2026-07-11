@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import {
   createUserWithEmailAndPassword,
   getAuth,
+  getIdTokenResult,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -79,6 +80,11 @@ export function signInPortalUser(email, password) {
 
 export function signOutPortalUser() {
   return signOut(requireService(portalAuth, 'Authentication'));
+}
+
+export async function getPortalTokenClaims(user) {
+  const result = await getIdTokenResult(user, true);
+  return result.claims || {};
 }
 
 export function sendPortalPasswordReset(email) {

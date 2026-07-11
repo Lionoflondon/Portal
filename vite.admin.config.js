@@ -1,0 +1,20 @@
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  root: 'admin',
+  plugins: [react()],
+  build: {
+    outDir: '../dist-admin',
+    emptyOutDir: true,
+  },
+  resolve: {
+    alias: {
+      '@portal': new URL('./src', import.meta.url).pathname,
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: '../src/test/setup.js',
+  },
+});
