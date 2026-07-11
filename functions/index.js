@@ -12,11 +12,74 @@ import { registryDecision, requiresElevatedReclaim } from './handle-registry.js'
 import { validateReclaimRequest } from './reclaim-policy.js';
 import { echoKey, echoNotificationId, isEchoablePost, nextEchoCount } from './echo-engine.js';
 import { calculateCommission, marketplacePaymentProvider, mayBeginCheckout, mayListHandle, mayTransfer, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
-import { confidenceFromSignals, dedupeDecision, initialStatusForCandidate, isMeaningfulEventChange, normaliseCandidate, timelineEntryId } from './global-events-engine.js';
+import { confidenceFromSignals, dedupeDecision, initialStatusForCandidate, isMeaningfulEventChange, normaliseCandidate, shouldPublishCandidate, timelineEntryId } from './global-events-engine.js';
 
 initializeApp();
 setGlobalOptions({ region: 'europe-west2' });
 const db = getFirestore();
+
+const PRODUCTION_PROVIDER_ROLLOUT = [
+  {
+    id: 'usgs-earthquakes-4-5-day',
+    displayName: 'USGS Earthquakes 4.5+ Day Feed',
+    category: 'Weather',
+    kind: 'usgs-earthquake-geojson',
+    url: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson',
+    enabled: true,
+    rolloutStage: 'limited_publication',
+    publishMode: 'limited',
+    refreshIntervalMinutes: 30,
+    maxItems: 8,
+    minimumMagnitude: 4.5,
+    sourceTrust: { tier: 'official', reputation: 'high' },
+    region: 'World',
+    geographicScope: 'World',
+    rateLimit: { maxRequestsPerRun: 1 },
+    parsingVersion: 1,
+    healthState: 'configured',
+    legalNotes: 'USGS public earthquake feed; Portal stores metadata, concise summaries and links only.',
+  },
+  {
+    id: 'github-blog-rss-shadow',
+    displayName: 'GitHub Blog RSS',
+    category: 'Technology',
+    kind: 'rss',
+    url: 'https://github.blog/feed/',
+    enabled: false,
+    rolloutStage: 'shadow',
+    publishMode: 'shadow',
+    refreshIntervalMinutes: 120,
+    maxItems: 5,
+    significanceKeywords: ['security', 'incident', 'major outage', 'platform change', 'research'],
+    sourceTrust: { tier: 'official', reputation: 'high' },
+    region: 'World',
+    geographicScope: 'World',
+    rateLimit: { maxRequestsPerRun: 1 },
+    parsingVersion: 1,
+    healthState: 'configured',
+    legalNotes: 'Official GitHub feed; disabled until technology significance filters are manually reviewed.',
+  },
+  {
+    id: 'nasa-news-rss-shadow',
+    displayName: 'NASA News Releases RSS',
+    category: 'Technology',
+    kind: 'rss',
+    url: 'https://www.nasa.gov/news-release/feed/',
+    enabled: false,
+    rolloutStage: 'shadow',
+    publishMode: 'shadow',
+    refreshIntervalMinutes: 180,
+    maxItems: 5,
+    significanceKeywords: ['launch', 'discovery', 'mission', 'research', 'major'],
+    sourceTrust: { tier: 'official', reputation: 'high' },
+    region: 'World',
+    geographicScope: 'World',
+    rateLimit: { maxRequestsPerRun: 1 },
+    parsingVersion: 1,
+    healthState: 'configured',
+    legalNotes: 'Official NASA feed; disabled for first rollout inspection.',
+  },
+];
 
 async function countEventActivity(eventId) {
   const reports = await db.collection('events').doc(eventId).collection('reports').get();
@@ -205,6 +268,31 @@ function xmlTag(item, tag) {
 async function fetchProviderCandidates(provider) {
   if (!provider.enabled) return [];
   if (!provider.url) return [];
+  if (provider.kind === 'usgs-earthquake-geojson') {
+    const response = await fetch(provider.url);
+    if (!response.ok) throw new Error(`Provider ${provider.id} returned ${response.status}`);
+    const payload = await response.json();
+    const features = Array.isArray(payload.features) ? payload.features : [];
+    return features.slice(0, provider.maxItems || 10).map((feature) => {
+      const props = feature.properties || {};
+      const coordinates = feature.geometry?.coordinates ? { longitude: feature.geometry.coordinates[0], latitude: feature.geometry.coordinates[1], depthKm: feature.geometry.coordinates[2] } : null;
+      const magnitude = Number(props.mag || 0);
+      return normaliseCandidate({
+        provider: provider.id,
+        providerItemId: props.ids || feature.id || props.code || props.url,
+        title: props.title || `Magnitude ${magnitude} earthquake`,
+        summary: `${props.title || 'Earthquake'}${props.tsunami ? ' with tsunami alert metadata.' : '.'}`,
+        sourceUrl: props.url,
+        publishedAt: props.time ? new Date(props.time).toISOString() : null,
+        updatedAt: props.updated ? new Date(props.updated).toISOString() : null,
+        locationText: props.place || provider.defaultLocation || 'World',
+        coordinates,
+        category: 'Weather',
+        sourceTrust: provider.sourceTrust || { tier: 'official', reputation: 'high' },
+        structuredData: { magnitude, place: props.place || null, alert: props.alert || null, tsunami: Boolean(props.tsunami), status: props.status || null },
+      });
+    }).filter((candidate) => shouldPublishCandidate(candidate, provider));
+  }
   if (provider.kind === 'official-json') {
     const response = await fetch(provider.url);
     if (!response.ok) throw new Error(`Provider ${provider.id} returned ${response.status}`);
@@ -222,7 +310,7 @@ async function fetchProviderCandidates(provider) {
       coordinates: item.coordinates || null,
       category: item.category || provider.defaultCategory || 'World',
       sourceTrust: provider.sourceTrust || { tier: 'official', reputation: 'high' },
-    }));
+    })).filter((candidate) => shouldPublishCandidate(candidate, provider));
   }
   if (provider.kind === 'rss' || provider.kind === 'atom') {
     const response = await fetch(provider.url);
@@ -243,7 +331,7 @@ async function fetchProviderCandidates(provider) {
         category: provider.defaultCategory || 'World',
         sourceTrust: provider.sourceTrust || { tier: 'publisher', reputation: 'standard' },
       });
-    });
+    }).filter((candidate) => shouldPublishCandidate(candidate, provider));
   }
   throw new Error(`Unsupported provider kind: ${provider.kind}`);
 }
@@ -309,9 +397,12 @@ async function upsertCandidate(candidate, provider) {
       summary: candidate.summary.slice(0, 700),
       sourceUrl: candidate.sourceUrl,
       publishedAt: candidate.publishedAt ? new Date(candidate.publishedAt) : null,
+      updatedAt: candidate.updatedAt ? new Date(candidate.updatedAt) : null,
       sourceTrust: candidate.sourceTrust,
+      contentFingerprint: candidate.fingerprint,
+      sourceAvailabilityState: 'available',
       createdAt: now,
-      updatedAt: now,
+      ingestedAt: now,
     }, { merge: true });
     const timelineType = candidate.sourceTrust?.tier === 'official' ? 'official_notice' : 'event_detected';
     transaction.set(db.collection('eventTimeline').doc(timelineEntryId(eventRef.id, candidateId, timelineType)), {
@@ -325,14 +416,14 @@ async function upsertCandidate(candidate, provider) {
       authorUid: null,
       handleSnapshot: null,
       content: candidate.summary || candidate.title,
-      structuredData: null,
+      structuredData: candidate.structuredData || null,
       confidenceLabel: eventSnapshot.exists ? eventSnapshot.data().confidenceLabel || 'Emerging' : 'Emerging',
       moderationState: 'approved',
       correctionTargetId: null,
       supersedesEntryId: null,
       supersededByEntryId: null,
       media: candidate.mediaPreview ? [candidate.mediaPreview] : [],
-      sourceAttribution: { provider: candidate.provider, title: candidate.title, sourceUrl: candidate.sourceUrl, sourceUnavailable: false },
+      sourceAttribution: { provider: candidate.provider, sourceName: candidate.sourceName || candidate.provider, title: candidate.title, sourceUrl: candidate.sourceUrl, sourceUnavailable: false, contentFingerprint: candidate.fingerprint },
       geography: { locationText: candidate.locationText, coordinates: candidate.coordinates || null },
       createdAt: now,
       updatedAt: now,
@@ -343,24 +434,67 @@ async function upsertCandidate(candidate, provider) {
   return { action: decision.action === 'attach' ? 'attach' : 'create', eventId: eventRef.id };
 }
 
-export const ingestGlobalEvents = onSchedule({ schedule: 'every 30 minutes', timeZone: 'Etc/UTC', maxInstances: 1 }, async () => {
+async function ensureProductionProviders() {
+  await Promise.all(PRODUCTION_PROVIDER_ROLLOUT.map((provider) => db.collection('ingestionProviders').doc(provider.id).set({
+    ...provider,
+    endpoint: provider.url,
+    secretReference: null,
+    updatedAt: FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
+  }, { merge: true })));
+}
+
+function shouldRunProvider(provider = {}) {
+  const intervalMinutes = Number(provider.refreshIntervalMinutes || 30);
+  const lastRunMs = provider.lastRunAt?.toMillis?.() || 0;
+  if (!lastRunMs) return true;
+  return Date.now() - lastRunMs >= Math.max(1, intervalMinutes) * 60 * 1000;
+}
+
+async function runGlobalEventsIngestion({ providerLimit = 10 } = {}) {
+  await ensureProductionProviders();
   const providersSnapshot = await db.collection('ingestionProviders').where('enabled', '==', true).limit(10).get();
   const runRef = await db.collection('ingestionRuns').add({ status: 'running', providerCount: providersSnapshot.size, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
-  let candidateCount = 0; let errorCount = 0;
-  for (const providerDoc of providersSnapshot.docs) {
+  let candidateCount = 0; let errorCount = 0; let createdCount = 0; let attachedCount = 0; let reviewCount = 0; let skippedCount = 0;
+  for (const providerDoc of providersSnapshot.docs.slice(0, providerLimit)) {
     const provider = { id: providerDoc.id, ...providerDoc.data() };
     try {
+      if (!shouldRunProvider(provider)) {
+        skippedCount += 1;
+        await providerDoc.ref.set({ healthState: provider.healthState || 'healthy', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        continue;
+      }
       const candidates = await fetchProviderCandidates(provider);
       candidateCount += candidates.length;
-      for (const candidate of candidates) await upsertCandidate(candidate, provider);
-      await providerDoc.ref.set({ lastRunAt: FieldValue.serverTimestamp(), lastError: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      for (const candidate of candidates) {
+        const outcome = await upsertCandidate(candidate, provider);
+        if (outcome.action === 'create') createdCount += 1;
+        else if (outcome.action === 'attach' || outcome.action === 'already_attached') attachedCount += 1;
+        else if (outcome.action === 'review') reviewCount += 1;
+      }
+      await providerDoc.ref.set({ lastSuccessfulRunAt: FieldValue.serverTimestamp(), lastRunAt: FieldValue.serverTimestamp(), lastError: null, healthState: 'healthy', lastCandidateCount: candidates.length, lastCreatedCount: createdCount, lastAttachedCount: attachedCount, lastReviewCount: reviewCount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     } catch (error) {
       errorCount += 1;
       logger.error('Global Events provider failed', { providerId: provider.id, error: error.message });
-      await providerDoc.ref.set({ lastError: error.message, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await providerDoc.ref.set({ lastFailureAt: FieldValue.serverTimestamp(), lastError: error.message, healthState: 'degraded', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await db.collection('auditLogs').add({ entityType: 'ingestionProvider', entityId: provider.id, changeType: 'provider_failure', summary: error.message, createdAt: FieldValue.serverTimestamp() });
     }
   }
-  await runRef.set({ status: errorCount ? 'completed_with_errors' : 'completed', candidateCount, errorCount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  const result = { runId: runRef.id, candidateCount, createdCount, attachedCount, reviewCount, skippedCount, errorCount };
+  await runRef.set({ status: errorCount ? 'completed_with_errors' : 'completed', candidateCount, createdCount, attachedCount, reviewCount, skippedCount, errorCount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  logger.info('Global Events ingestion completed', result);
+  return result;
+}
+
+export const ingestGlobalEvents = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Etc/UTC', maxInstances: 1 }, async () => {
+  await runGlobalEventsIngestion();
+});
+
+export const runGlobalEventsIngestionNow = onCall(async (request) => {
+  const uid = requireAuth(request);
+  if (request.auth.token.admin !== true && request.auth.token.custodian !== true) throw new HttpsError('permission-denied', 'Only Portal admins or Custodians can run ingestion manually.');
+  await db.collection('auditLogs').add({ entityType: 'ingestionRun', entityId: 'manual', changeType: 'manual_ingestion_requested', actorUid: uid, createdAt: FieldValue.serverTimestamp() });
+  return runGlobalEventsIngestion({ providerLimit: 1 });
 });
 
 export const submitEventContribution = onCall(async (request) => {

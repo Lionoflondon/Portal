@@ -10,6 +10,10 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function isPrivilegedPortalOperator() {
+      return signedIn() && (request.auth.token.admin == true || request.auth.token.custodian == true);
+    }
+
     function isEventCreator() {
       return signedIn() && resource.data.createdBy == request.auth.uid;
     }
@@ -130,8 +134,14 @@ service cloud.firestore {
 
     match /eventCandidates/{candidateId} { allow read, write: if false; }
     match /eventMergeReviews/{reviewId} { allow read, write: if false; }
-    match /ingestionProviders/{providerId} { allow read, write: if false; }
-    match /ingestionRuns/{runId} { allow read, write: if false; }
+    match /ingestionProviders/{providerId} {
+      allow read: if isPrivilegedPortalOperator();
+      allow write: if false;
+    }
+    match /ingestionRuns/{runId} {
+      allow read: if isPrivilegedPortalOperator();
+      allow write: if false;
+    }
 
     match /vortexEntries/{entryId} {
       allow read: if signedIn();

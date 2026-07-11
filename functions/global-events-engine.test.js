@@ -11,6 +11,7 @@ import {
   paginateTimeline,
   replayTimelineAt,
   sameHappening,
+  shouldPublishCandidate,
   sortTimelineEntries,
   applyCorrection,
   structuredSnapshotFromTimeline,
@@ -94,4 +95,11 @@ test('historical replay excludes future corrections and pagination is stable', (
   ];
   assert.deepEqual(replayTimelineAt(entries, 200).map((entry) => entry.entryId), ['detected', 'claim']);
   assert.deepEqual(paginateTimeline(entries, { limit: 2 }).page.map((entry) => entry.entryId), ['detected', 'claim']);
+});
+
+test('provider rollout policy blocks shadow providers and minor technology posts', () => {
+  const candidate = normaliseCandidate({ provider: 'tech', providerItemId: 'minor', title: 'Small maintenance release', category: 'Technology' });
+  assert.equal(shouldPublishCandidate(candidate, { rolloutStage: 'shadow' }), false);
+  assert.equal(shouldPublishCandidate(candidate, { significanceKeywords: ['security incident', 'major outage'] }), false);
+  assert.equal(shouldPublishCandidate(normaliseCandidate({ provider: 'tech', providerItemId: 'outage', title: 'Major outage affects platform', category: 'Technology' }), { significanceKeywords: ['major outage'] }), true);
 });

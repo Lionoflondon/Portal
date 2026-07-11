@@ -301,6 +301,10 @@ export function observePortalNotifications(uid, callback, onError) {
   return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'users', uid, 'notifications'), orderBy('createdAt', 'desc')), callback, onError);
 }
 
+export function observeIngestionProviders(callback, onError) {
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), 'ingestionProviders'), orderBy('updatedAt', 'desc')), callback, onError);
+}
+
 export function markPortalNotificationRead(uid, notificationId) {
   return updateDoc(doc(requireService(portalDb, 'Firestore'), 'users', uid, 'notifications', notificationId), {
     read: true,

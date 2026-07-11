@@ -55,6 +55,8 @@ export function normaliseCandidate(input = {}) {
     category: input.category || 'World',
     mediaPreview: input.mediaPreview || null,
     sourceTrust: input.sourceTrust || { tier: 'publisher', reputation: 'standard' },
+    structuredData: input.structuredData || null,
+    sourceName: input.sourceName || provider,
     fingerprint: normaliseEventText(`${title} ${input.locationText || ''} ${input.category || ''}`),
   };
 }
@@ -112,6 +114,17 @@ export function isTrustedStatusChange(actorType, status) {
 
 export function isMeaningfulEventChange(change = {}) {
   return ['status_changed', 'major_update', 'official_source_added', 'correction_confirmed', 'event_resolved', 'related_event_linked'].includes(change.type);
+}
+
+export function shouldPublishCandidate(candidate = {}, provider = {}) {
+  if (provider.rolloutStage === 'shadow') return false;
+  if (provider.publishMode === 'shadow') return false;
+  const title = normaliseEventText(`${candidate.title} ${candidate.summary}`);
+  const required = provider.significanceKeywords || [];
+  if (required.length && !required.some((keyword) => title.includes(normaliseEventText(keyword)))) return false;
+  if (provider.minimumMagnitude && Number(candidate.structuredData?.magnitude || 0) < provider.minimumMagnitude) return false;
+  if (provider.excludeKeywords?.some((keyword) => title.includes(normaliseEventText(keyword)))) return false;
+  return true;
 }
 
 export function timelineEntryId(eventId, sourceKey, entryType, sequence = 0) {
