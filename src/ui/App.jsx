@@ -5,6 +5,7 @@ import {
   changePortalHandle,
   changePortalPassword,
   checkPortalHandle,
+  createPortalHandleListing,
   createPortalReport,
   hasFirebaseConfig,
   observeEvent,
@@ -14,14 +15,17 @@ import {
   observeSession,
   observeVortex,
   observeVortexEntries,
+  openPortalHandleDispute,
   publishPortalReport,
   registerPortalUser,
   reservePortalHandle,
   resolvePortalHandle,
+  searchPortalHandleMarketplace,
   sendPortalPasswordReset,
   setVortexFollow,
   signInPortalUser,
   signOutPortalUser,
+  submitPortalHandleOffer,
   updatePortalEvent,
   updatePortalProfile,
 } from '../services/firebase.js';
@@ -113,6 +117,16 @@ function VortexEntry({ entry, following, onFollow }) {
   return <article className="glass card vortex-entry"><div className="inline-meta"><span className={`entry-type ${entry.entryType.toLowerCase()}`}>{entry.entryType}</span>{entry.status ? <span className="source-chip">{entry.status}</span> : null}<span className="body-sm">Active {timeLabel(entry.latestActivityAt)}</span></div>{href ? <a href={href}><h2 className="display-md">{entry.title}</h2></a> : <h2 className="display-md">{entry.title}</h2>}<p className="body-sm">{entry.displaySummary}</p><div className="metrics"><span>{entry.contributionCount || 0} contributions</span><span>{entry.reportCount || 0} reports</span><span>{entry.sourceCount || 0} sources</span></div>{eventEntry ? <button className="btn btn-secondary btn-sm" type="button" onClick={() => onFollow(entry.sourceId, !following)}>{following ? 'Following' : 'Follow event'}</button> : null}</article>;
 }
 
+function HandleMarketplace({ user }) {
+  const [handle, setHandle] = useState(''); const [result, setResult] = useState(null); const [error, setError] = useState(''); const [offer, setOffer] = useState(''); const [price, setPrice] = useState(''); const [busy, setBusy] = useState(false);
+  async function search(event) { event.preventDefault(); setBusy(true); setError(''); try { setResult(await searchPortalHandleMarketplace(handle)); } catch (reason) { setError(firebaseMessage(reason)); } finally { setBusy(false); } }
+  async function list() { setBusy(true); try { await createPortalHandleListing(result.handle.normalizedHandle, Number(price)); setResult(await searchPortalHandleMarketplace(result.handle.normalizedHandle)); } catch (reason) { setError(firebaseMessage(reason)); } finally { setBusy(false); } }
+  async function makeOffer() { setBusy(true); try { await submitPortalHandleOffer(result.listing.listingId, Number(offer)); setOffer(''); } catch (reason) { setError(firebaseMessage(reason)); } finally { setBusy(false); } }
+  async function dispute() { setBusy(true); try { await openPortalHandleDispute(result.listing.listingId); setResult(await searchPortalHandleMarketplace(result.handle.normalizedHandle)); } catch (reason) { setError(firebaseMessage(reason)); } finally { setBusy(false); } }
+  const protectedHandle = result?.handle?.saleEligible === false || result?.handle?.status === 'protected'; const listing = result?.listing;
+  return <div className="page"><div><h1 className="display-xl">Handle Marketplace</h1><p className="body-md">Reserve, discover and trade eligible Portal identities.</p></div><form className="glass card form-stack" onSubmit={search}><label>Find a handle<input value={handle} onChange={(event) => setHandle(event.target.value.replace(/^@/, ''))} placeholder="@handle" /></label><button className="btn btn-primary" disabled={busy}>Search</button></form>{error ? <p className="form-error" role="alert">{error}</p> : null}{result ? <section className="glass card marketplace-card"><div><span className="entry-type signal">{result.handle.marketplaceClass || 'available'}</span><h2 className="display-lg">@{result.handle.normalizedHandle}</h2><p className="body-sm">{result.handle.status === 'available' ? 'Available to reserve.' : result.handle.status === 'protected' ? 'This handle is protected and is not available for sale.' : listing ? `${listing.ownershipType === 'portal_owned' ? 'Available directly from Portal.' : 'Offers are open. Portal-managed checkout is being prepared.'}` : 'Your current Portal identity can be listed after verification.'}</p></div>{protectedHandle ? <p className="form-error">This handle is protected and is not available for sale.</p> : !listing && result.handle.ownerUid === user.uid ? <div className="form-stack"><label>Asking price (minor units)<input type="number" value={price} onChange={(event) => setPrice(event.target.value)} /></label><button className="btn btn-secondary" type="button" disabled={busy || !price} onClick={list}>Create listing</button></div> : listing ? <><div className="metrics"><span>{listing.listingStatus}</span><span>{listing.askingPriceAmount} {listing.currency}</span><span>{listing.ownershipType}</span></div>{listing.sellerUid !== user.uid && listing.listingStatus === 'active' ? <div className="form-actions"><input className="market-input" type="number" placeholder="Offer (minor units)" value={offer} onChange={(event) => setOffer(event.target.value)} /><button className="btn btn-secondary" type="button" disabled={busy || !offer} onClick={makeOffer}>Make offer</button></div> : null}{listing.sellerUid === user.uid && !listing.disputeState ? <button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={dispute}>Open dispute</button> : null}{listing.ownershipType === 'user_owned' && listing.listingStatus === 'awaiting_payment_provider' ? <p className="form-notice">Portal-managed checkout is being prepared. This handle cannot be transferred outside Portal.</p> : null}</> : null}</section> : <div className="glass card empty-state"><p className="body-sm">Search a handle to see its Portal status.</p></div>}</div>;
+}
+
 function HandleIdentity({ profile }) {
   const [handle, setHandle] = useState(profile?.handle || ''); const [state, setState] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false);
   useEffect(() => { setHandle(profile?.handle || ''); }, [profile?.handle]);
@@ -178,6 +192,6 @@ export function App() {
   if (current.startsWith('/@')) return <PublicProfile handle={current.slice(2)} />;
   if (!user) return <AuthScreen />;
   const eventState = { events, loading: eventsLoading, error: eventsError };
-  let page; if (current === '/events') page = <Events user={user} eventState={eventState} onFollow={follow} following={following} onCreate={() => setCreateOpen(true)} />; else if (current.startsWith('/events/')) page = <EventDetail eventId={current.split('/')[2]} user={user} events={events} onFollow={follow} following={following.has(current.split('/')[2])} />; else if (current === '/vortex') page = <Vortex entries={vortexEntries} loading={vortexLoading} error={vortexError} following={following} onFollow={follow} />; else if (current === '/settings') page = <Settings user={user} profile={profile} />; else if (current === '/profile') page = <div className="page"><h1 className="display-xl">{profile?.displayName || user.displayName || 'Profile'}</h1>{profile?.handle ? <a className="see-all" href={`/@${profile.handle}`}>View public profile</a> : <div className="glass card"><p className="body-md">Choose your Portal identity in Settings before publishing publicly.</p></div>}</div>; else page = <Home eventState={eventState} onFollow={follow} following={following} />;
+  let page; if (current === '/events') page = <Events user={user} eventState={eventState} onFollow={follow} following={following} onCreate={() => setCreateOpen(true)} />; else if (current.startsWith('/events/')) page = <EventDetail eventId={current.split('/')[2]} user={user} events={events} onFollow={follow} following={following.has(current.split('/')[2])} />; else if (current === '/vortex') page = <Vortex entries={vortexEntries} loading={vortexLoading} error={vortexError} following={following} onFollow={follow} />; else if (current === '/marketplace') page = <HandleMarketplace user={user} />; else if (current === '/settings') page = <Settings user={user} profile={profile} />; else if (current === '/profile') page = <div className="page"><h1 className="display-xl">{profile?.displayName || user.displayName || 'Profile'}</h1>{profile?.handle ? <a className="see-all" href={`/@${profile.handle}`}>View public profile</a> : <div className="glass card"><p className="body-md">Choose your Portal identity in Settings before publishing publicly.</p></div>}</div>; else page = <Home eventState={eventState} onFollow={follow} following={following} />;
   return <><a href="#main" className="skip-link">Skip to content</a><div className="app"><Sidebar current={current} profile={{ ...profile, email: user.email }} onCreate={() => setCreateOpen(true)} /><Topbar profile={profile} /><div className="main-col"><main id="main" className="content-col" tabIndex="-1">{page}</main></div><BottomNav current={current} /></div><CreateModal open={createOpen} onClose={() => setCreateOpen(false)} user={user} profile={profile} events={events} /></>;
 }

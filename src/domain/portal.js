@@ -12,6 +12,7 @@ export const routes = [
 
 export const secondaryRoutes = [
   { path: '/settings', label: 'Settings', icon: 'settings' },
+  { path: '/marketplace', label: 'Handle Marketplace', icon: 'premium' },
   { path: '/memory', label: 'Portal+ Memory', icon: 'premium' },
   { path: '/contributors', label: 'Contributor Hub', icon: 'creator' },
   { path: '/sources', label: 'Official Sources', icon: 'brand' },

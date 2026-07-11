@@ -36,6 +36,41 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /handleListings/{listingId} {
+      allow read: if signedIn() && (resource.data.listingStatus == 'active'
+        || resource.data.sellerUid == request.auth.uid
+        || resource.data.buyerUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /handleOffers/{offerId} {
+      allow read: if signedIn() && (resource.data.sellerUid == request.auth.uid || resource.data.buyerUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /handleTransactions/{transactionId} {
+      allow read: if signedIn() && (resource.data.sellerUid == request.auth.uid || resource.data.buyerUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /handleTransfers/{transferId} {
+      allow read: if signedIn() && (resource.data.sellerUid == request.auth.uid || resource.data.buyerUid == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /handleDisputes/{disputeId} {
+      allow read: if signedIn() && resource.data.openedByUid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /protectedHandleClaims/{claimId} {
+      allow read: if signedIn() && resource.data.claimantUid == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /marketplaceConfig/{configId} { allow read, write: if false; }
+    match /auditLogs/{auditId} { allow read, write: if false; }
+
     match /events/{eventId} {
       allow read: if signedIn();
       allow create: if signedIn()

@@ -266,3 +266,7 @@ export function reservePortalHandle(handle) { return callPortalIdentity('reserve
 export function changePortalHandle(handle) { return callPortalIdentity('changeHandle', { handle }); }
 export function resolvePortalHandle(handle) { return callPortalIdentity('resolveHandle', { handle }); }
 export function searchPortalProfiles(term) { return callPortalIdentity('searchPortalProfiles', { term }); }
+export function searchPortalHandleMarketplace(handle) { return callPortalIdentity('searchHandleMarketplace', { handle }); }
+export function createPortalHandleListing(handle, askingPriceAmount, currency = 'GBP') { return callPortalIdentity('createHandleListing', { handle, askingPriceAmount, currency }); }
+export function submitPortalHandleOffer(listingId, offerAmount) { return callPortalIdentity('submitHandleOffer', { listingId, offerAmount }); }
+export function openPortalHandleDispute(listingId) { return callPortalIdentity('openHandleDispute', { listingId }); }
