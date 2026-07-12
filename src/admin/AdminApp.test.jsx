@@ -88,7 +88,7 @@ describe('Portal Admin authentication', () => {
     expect(adminSource).toContain('🟢 Emerging');
     expect(adminSource).toContain('🔴 Critical');
     expect(adminSource).toContain('⚫ Archived');
-    expect(adminSource).toContain("href=\"#/vortex\"");
+    expect(adminSource).toContain("['/trending', 'Trending']");
     expect(adminSource).not.toContain('AI Confidence');
     expect(adminSource).not.toContain('Machine confidence');
     expect(adminSource).not.toContain('Algorithm confidence');
@@ -107,5 +107,60 @@ describe('Portal Admin authentication', () => {
     expect(adminSource).not.toContain('PostCard');
     expect(adminSource).not.toContain('QuoteEchoComposer');
     expect(adminSource).not.toContain('interaction-bar');
+  });
+
+  it('renders Portal Admin V2 enterprise navigation and operations surfaces', () => {
+    const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/admin/admin.css'), 'utf8');
+    for (const label of ['Dashboard', 'Users', 'Moderation', 'Events', 'Trending', 'Verification', 'Handle Marketplace', 'Creators', 'Reports', 'Notifications', 'Analytics', 'Audit Log', 'System Health', 'Settings']) {
+      expect(adminSource).toContain(label);
+    }
+    for (const metric of ['Active users', 'Users online now', 'Posts today', 'New registrations', 'Active events', 'Pending reports', 'Verification queue', 'Marketplace revenue', 'Tips today', 'Platform uptime']) {
+      expect(adminSource).toContain(metric);
+    }
+    for (const chart of ['User growth', 'Posts/hour', 'Engagement', 'Active regions', 'Top categories']) {
+      expect(adminSource).toContain(chart);
+    }
+    for (const activity of ['New reports', 'New verified users', 'Handle sales', 'Trending stories', 'System alerts']) {
+      expect(adminSource).toContain(activity);
+    }
+    expect(adminSource).toContain('function UsersAdmin');
+    expect(adminSource).toContain('Search by handle, name, email or user ID');
+    expect(adminSource).toContain('Trust Score');
+    expect(adminSource).toContain('Force logout');
+    expect(adminSource).toContain('function ModerationAdmin');
+    expect(adminSource).toContain('Reported Posts');
+    expect(adminSource).toContain('Reported Quote Echoes');
+    expect(adminSource).toContain('Permanent delete');
+    expect(adminSource).toContain('function EventsAdmin');
+    expect(adminSource).toContain('Live Event operations');
+    expect(adminSource).toContain('Reporter confidence');
+    expect(adminSource).toContain('Event health');
+    expect(adminSource).toContain('function VerificationAdmin');
+    expect(adminSource).toContain('Emergency Services');
+    expect(adminSource).toContain('function ReportsAdmin');
+    expect(adminSource).toContain('False information');
+    expect(adminSource).toContain('function NotificationsAdmin');
+    expect(adminSource).toContain('Entire platform');
+    expect(adminSource).toContain('Specific city');
+    expect(adminSource).toContain('function AnalyticsAdmin');
+    expect(adminSource).toContain('Device breakdown');
+    expect(adminSource).toContain('function AuditLogAdmin');
+    expect(adminSource).toContain('Timestamp');
+    expect(adminSource).toContain('Old value');
+    expect(adminSource).toContain('New value');
+    expect(adminSource).toContain('function SystemHealthAdmin');
+    expect(adminSource).toContain('Firestore');
+    expect(adminSource).toContain('Functions');
+    expect(adminSource).toContain('Search indexing');
+    expect(adminSource).toContain('function SettingsAdmin');
+    expect(adminSource).toContain('Feature flags');
+    expect(adminSource).toContain('Country availability');
+    expect(adminSource).toContain('Platform branding');
+    expect(styles).toContain('.enterprise-admin-shell');
+    expect(styles).toContain('.admin-sidebar');
+    expect(styles).toContain('.admin-kpi-grid');
+    expect(styles).toContain('.admin-table');
+    expect(styles).toContain('.admin-health-grid');
   });
 });

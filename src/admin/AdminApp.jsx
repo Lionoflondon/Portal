@@ -276,10 +276,103 @@ function VortexControlCentre() {
   })}</div> : <section className="glass card empty-state compact-empty"><h2 className="display-md">No live Pulse stories yet</h2><p className="body-sm">Stories appear here when Vortex entries are projected by Portal&apos;s event and discovery systems.</p></section>}</div>;
 }
 
+const adminSections = [
+  ['/', 'Dashboard'],
+  ['/users', 'Users'],
+  ['/moderation', 'Moderation'],
+  ['/events', 'Events'],
+  ['/trending', 'Trending'],
+  ['/verification', 'Verification'],
+  ['/handles', 'Handle Marketplace'],
+  ['/creators', 'Creators'],
+  ['/reports', 'Reports'],
+  ['/notifications', 'Notifications'],
+  ['/analytics', 'Analytics'],
+  ['/audit-log', 'Audit Log'],
+  ['/system-health', 'System Health'],
+  ['/settings', 'Settings'],
+];
+
+const dashboardKpis = ['Active users', 'Users online now', 'Posts today', 'New registrations', 'Active events', 'Pending reports', 'Verification queue', 'Marketplace revenue', 'Tips today', 'Platform uptime'];
+const dashboardCharts = ['User growth', 'Posts/hour', 'Engagement', 'Active regions', 'Top categories'];
+const dashboardActivity = ['New reports', 'New verified users', 'Handle sales', 'Trending stories', 'System alerts'];
+
+function AdminDashboard() {
+  return <div className="page enterprise-dashboard"><div><h1 className="display-xl">Dashboard</h1><p className="body-md">Enterprise operations overview for Portal staff.</p></div><div className="admin-kpi-grid">{dashboardKpis.map((label, index) => <article className="glass card admin-kpi-card" key={label}><span className="eyebrow">{label}</span><strong>{index === 7 || index === 8 ? '£0' : index === 9 ? '99.99%' : '0'}</strong><small>Live backend metric</small></article>)}</div><section className="admin-chart-grid">{dashboardCharts.map((label) => <article className="glass card admin-chart-card" key={label}><div className="section-header"><h2>{label}</h2><span className="source-chip">Live</span></div><div className="admin-chart-placeholder" aria-label={`${label} chart`} /></article>)}</section><section className="glass card"><h2 className="display-md">Activity feed</h2><div className="admin-activity-list">{dashboardActivity.map((item) => <article className="admin-activity-row" key={item}><span className="source-chip">{item}</span><p className="body-sm">Waiting for live operational activity.</p></article>)}</div></section><AdminPasswordPanel /></div>;
+}
+
+function AdminDataTable({ title, description, searchPlaceholder, columns, actions = [], queues = [] }) {
+  return <div className="page admin-ops-page"><div><h1 className="display-xl">{title}</h1><p className="body-md">{description}</p></div>{queues.length ? <div className="admin-queue-grid">{queues.map((queue) => <button className="glass card admin-queue-card" type="button" key={queue}><strong>{queue}</strong><span className="body-sm">0 pending</span></button>)}</div> : null}<section className="glass card"><div className="section-header"><h2>{title} search</h2><span className="source-chip">Callable actions only</span></div><label className="admin-search-field">Global search<input placeholder={searchPlaceholder} /></label><div className="admin-table" role="table" aria-label={title}><div className="admin-table-row admin-table-head" role="row">{columns.map((column) => <span role="columnheader" key={column}>{column}</span>)}</div><div className="admin-table-row empty" role="row">{columns.map((column, index) => <span role="cell" key={column}>{index === 0 ? 'No records loaded' : '—'}</span>)}</div></div></section>{actions.length ? <section className="glass card"><h2 className="display-md">Actions</h2><div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" key={action}>{action}</button>)}</div></section> : null}</div>;
+}
+
+function UsersAdmin() {
+  return <AdminDataTable title="Users" description="Global user operations, trust, verification and marketplace ownership." searchPlaceholder="Search by handle, name, email or user ID" columns={['Avatar', 'Handle', 'Display name', 'Trust Score', 'Joined', 'Followers', 'Following', 'Posts', 'Reports', 'Warnings', 'Suspensions', 'Verification', 'Marketplace ownership']} actions={['Suspend', 'Unsuspend', 'Ban', 'Delete account', 'Force logout', 'Reset password', 'Transfer handle', 'View audit history', 'Message user', 'View reports']} />;
+}
+
+function ModerationAdmin() {
+  return <AdminDataTable title="Moderation" description="Central review queues for unsafe, abusive or illegal content." searchPlaceholder="Search moderation cases" columns={['Case', 'Queue', 'Reporter', 'Target', 'Severity', 'Status', 'Moderator']} queues={['Reported Posts', 'Reported Replies', 'Reported Echoes', 'Reported Quote Echoes', 'Reported Media', 'Reported Profiles', 'Spam Detection', 'Impersonation', 'Copyright', 'Harassment']} actions={['Approve', 'Remove', 'Restore', 'Warn', 'Temporary hide', 'Permanent delete', 'Escalate', 'Moderator notes']} />;
+}
+
+function EventsAdmin() {
+  return <AdminDataTable title="Events" description="Live Event operations, merge review, archive controls and regional monitoring." searchPlaceholder="Search Events by title, region, source or status" columns={['Event', 'Region', 'Status', 'Reporter confidence', 'Event health', 'Timeline', 'Media gallery']} actions={['Merge duplicate events', 'Pin featured events', 'Archive events', 'Split merged events', 'Apply regional filters']} />;
+}
+
+function TrendingAdmin() {
+  return <AdminDataTable title="Trending" description="Global, country and city trend controls." searchPlaceholder="Search trends, handles, hashtags or Events" columns={['Trend', 'Scope', 'Velocity', 'Source', 'Spam risk', 'Status']} queues={['Global trends', 'Country trends', 'City trends', 'Emerging topics', 'Trending handles', 'Trending hashtags', 'Trending events']} actions={['Pin', 'Remove', 'Merge', 'Suppress spam']} />;
+}
+
+function VerificationAdmin() {
+  return <AdminDataTable title="Verification" description="Identity review for people, journalists, businesses, creators and institutions." searchPlaceholder="Search verification requests" columns={['Applicant', 'Type', 'Documents', 'Risk', 'Status', 'Reviewer']} queues={['People', 'Journalists', 'Businesses', 'Creators', 'Government', 'Emergency Services']} actions={['Approve', 'Reject', 'Request documents', 'Remove verification']} />;
+}
+
+function CreatorsAdmin() {
+  return <AdminDataTable title="Creators" description="Creator directory, earnings, strikes and verification operations." searchPlaceholder="Search creators" columns={['Creator', 'Followers', 'Tips received', 'Monthly earnings', 'Subscriptions', 'Strikes', 'Verification']} actions={['View creator', 'Review strikes', 'Adjust verification', 'View earnings']} />;
+}
+
+function ReportsAdmin() {
+  return <AdminDataTable title="Reports" description="Unified report inbox with evidence, history and moderator actions." searchPlaceholder="Search reports by reporter, user, category or evidence" columns={['Reporter', 'Reported user', 'Category', 'Evidence', 'History', 'Status']} queues={['Unified inbox', 'Spam', 'Abuse', 'Harassment', 'Copyright', 'Violence', 'Illegal content', 'Impersonation', 'False information']} actions={['Approve', 'Remove', 'Escalate', 'Add moderator note']} />;
+}
+
+function NotificationsAdmin() {
+  return <AdminDataTable title="Notifications" description="Broadcast tools for platform, country, city, segment and specific-user messages." searchPlaceholder="Search broadcasts" columns={['Broadcast', 'Audience', 'Type', 'Status', 'Scheduled', 'Sent']} queues={['Entire platform', 'Verified users', 'Businesses', 'Specific country', 'Specific city', 'Specific users']} actions={['Announcement', 'Maintenance', 'Security', 'Emergency', 'Feature release']} />;
+}
+
+function AnalyticsAdmin() {
+  return <AdminDataTable title="Analytics" description="Growth, engagement, creator, marketplace, tips, regional and device analytics." searchPlaceholder="Search analytics reports" columns={['Metric', 'Current', 'Change', 'Region', 'Device', 'Period']} queues={['DAU', 'MAU', 'Retention', 'Engagement', 'Session duration', 'Growth', 'Creator metrics', 'Marketplace revenue', 'Tips', 'Regional usage', 'Device breakdown']} />;
+}
+
+function AuditLogAdmin() {
+  return <AdminDataTable title="Audit Log" description="Read-only searchable and exportable admin action history." searchPlaceholder="Search by admin, target, action, reason, IP or device" columns={['Timestamp', 'Admin', 'Target', 'Action', 'Old value', 'New value', 'Reason', 'IP', 'Device']} actions={['Export']} />;
+}
+
+function SystemHealthAdmin() {
+  return <div className="page"><div><h1 className="display-xl">System Health</h1><p className="body-md">Operational status indicators for core Portal infrastructure.</p></div><div className="admin-health-grid">{['Firestore', 'Functions', 'Storage', 'Authentication', 'Notifications', 'Search indexing', 'Realtime listeners', 'Queues', 'CDN', 'Hosting'].map((item) => <article className="glass card admin-health-card healthy" key={item}><strong>{item}</strong><span className="source-chip">Healthy</span><p className="body-sm">No warning or critical state reported.</p></article>)}</div></div>;
+}
+
+function SettingsAdmin() {
+  return <AdminDataTable title="Settings" description="Server-authoritative operational configuration." searchPlaceholder="Search settings" columns={['Setting', 'Current value', 'Environment', 'Owner', 'Updated']} queues={['Feature flags', 'Moderation settings', 'Marketplace settings', 'Verification rules', 'Trending rules', 'Upload limits', 'Storage rules', 'Country availability', 'Platform branding']} actions={['Request change', 'View audit history']} />;
+}
+
 function AdminWorkspace({ current, user }) {
-  const handles = current === '/handles' || current === '/admin/handles';
-  const vortex = current === '/vortex' || current === '/admin/vortex';
-  return <main className="admin-shell"><header className="admin-topbar"><Brand /><div><span className="eyebrow">Staff only</span><strong>Portal administration</strong></div><span className="body-sm">{user.email}</span><button className="btn btn-secondary btn-sm" type="button" onClick={() => signOutPortalUser()}>Sign out</button></header><div className="admin-layout"><nav className="admin-nav" aria-label="Portal administration"><a href="#/" aria-current={!handles && !vortex ? 'page' : undefined}>Overview</a><a href="#/vortex" aria-current={vortex ? 'page' : undefined}>Vortex Control Centre</a><a href="#/handles" aria-current={handles ? 'page' : undefined}>Handle Registry</a></nav><section className="admin-content">{handles ? <AdminHandleRegistry /> : vortex ? <VortexControlCentre /> : <div className="page"><div><h1 className="display-xl">Portal administration</h1><p className="body-md">Controlled operational surfaces for Portal staff.</p></div><section className="glass card"><h2 className="display-md">Vortex Control Centre</h2><p className="body-sm">Monitor active Pulse stories, growth trends, official source signals and Custodian review load.</p><a className="btn btn-primary" href="#/vortex">Open Vortex Control Centre</a></section><section className="glass card"><h2 className="display-md">Handle Registry</h2><p className="body-sm">Search, classify and reclaim protected Portal identities. Server functions enforce admin authority.</p><a className="btn btn-primary" href="#/handles">Open Handle Registry</a></section><AdminPasswordPanel /></div>}</section></div></main>;
+  const route = current === '/admin/handles' ? '/handles' : current === '/admin/vortex' ? '/trending' : current;
+  const pageMap = {
+    '/': <AdminDashboard />,
+    '/users': <UsersAdmin />,
+    '/moderation': <ModerationAdmin />,
+    '/events': <EventsAdmin />,
+    '/trending': <TrendingAdmin />,
+    '/vortex': <VortexControlCentre />,
+    '/verification': <VerificationAdmin />,
+    '/handles': <AdminHandleRegistry />,
+    '/creators': <CreatorsAdmin />,
+    '/reports': <ReportsAdmin />,
+    '/notifications': <NotificationsAdmin />,
+    '/analytics': <AnalyticsAdmin />,
+    '/audit-log': <AuditLogAdmin />,
+    '/system-health': <SystemHealthAdmin />,
+    '/settings': <SettingsAdmin />,
+  };
+  return <main className="admin-shell enterprise-admin-shell"><aside className="admin-sidebar"><Brand /><nav className="admin-nav" aria-label="Portal administration">{adminSections.map(([path, label]) => <a href={`#${path}`} aria-current={route === path ? 'page' : undefined} key={path}>{label}</a>)}</nav></aside><section className="admin-main"><header className="admin-topbar"><div><span className="eyebrow">Staff only</span><strong>Portal Enterprise Operations Centre</strong></div><span className="body-sm">{user.email}</span><button className="btn btn-secondary btn-sm" type="button" onClick={() => signOutPortalUser()}>Sign out</button></header><section className="admin-content">{pageMap[route] || <AdminDashboard />}</section></section></main>;
 }
 
 export default function AdminApp() {
