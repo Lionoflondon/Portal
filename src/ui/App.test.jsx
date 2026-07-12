@@ -247,24 +247,62 @@ describe('Portal app shell', () => {
     expect(service).toContain('data.profiles || data || []');
   });
 
-  it('simplifies Notification Centre filters without changing backend notification types', () => {
+  it('uses complete public Notification Centre filters without changing backend notification types', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const notificationTextBlock = source.match(/function notificationText\([\s\S]*?\n}\n\nfunction notificationIcon/)?.[0] || '';
     const notificationBlock = source.match(/function Notifications\([\s\S]*?\n}\n\nfunction Messages/)?.[0] || '';
-    expect(notificationBlock).toContain("const categories = ['All', 'Mentions', 'Likes'];");
+    expect(notificationBlock).toContain("const categories = ['All', 'Replies', 'Echoes', 'Mentions', 'Follows', 'Events', 'Official Sources', 'Verification'];");
     expect(notificationBlock).toContain("if (filter === 'All') return true;");
+    expect(notificationBlock).toContain("if (filter === 'Replies') return item.type === 'reply';");
+    expect(notificationBlock).toContain("if (filter === 'Echoes') return item.type === 'echo' || item.type === 'quote_echo';");
     expect(notificationBlock).toContain("if (filter === 'Mentions') return item.type === 'mention'");
-    expect(notificationBlock).toContain("if (filter === 'Likes') return item.type === 'like' || item.type === 'reaction';");
-    expect(notificationBlock).not.toContain("'Replies'");
-    expect(notificationBlock).not.toContain("'Echoes'");
+    expect(notificationBlock).toContain("if (filter === 'Follows') return item.type === 'follow';");
+    expect(notificationBlock).toContain("if (filter === 'Events') return item.type === 'event_update' || item.eventId;");
+    expect(notificationBlock).toContain("if (filter === 'Official Sources') return item.type === 'official_source' || item.sourceId;");
+    expect(notificationBlock).toContain("if (filter === 'Verification') return item.type === 'handle_approval' || item.type === 'verification_update';");
     expect(notificationBlock).not.toContain("'Quote Echoes'");
-    expect(notificationBlock).not.toContain("'Follows'");
     expect(notificationBlock).not.toContain("'Handles'");
     expect(notificationTextBlock).toContain('quoted your post.');
     expect(notificationTextBlock).toContain('echoed your post.');
     expect(notificationTextBlock).toContain('mentioned you.');
     expect(notificationTextBlock).not.toContain('added a Quote Echo to your Post.');
     expect(notificationTextBlock).not.toContain('echoed your Post.');
-    expect(notificationBlock).toContain('All activity, direct mentions and likes.');
+    expect(notificationBlock).toContain('Replies, Echoes, mentions, follows, Event updates, sources and verification.');
+  });
+
+  it('completes the public Portal sprint surfaces without touching Admin or backend contracts', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const composerBlock = source.match(/function PostComposer\([\s\S]*?\n}\n\nfunction PostDetail/)?.[0] || '';
+    const profileBlock = source.match(/function PersonalProfile\([\s\S]*?\n}\n\nfunction FeaturePage/)?.[0] || '';
+    const eventCardBlock = source.match(/function EventCard\([\s\S]*?\n}\n\nfunction EventCollection/)?.[0] || '';
+    const settingsBlock = source.match(/function Settings\([\s\S]*?\n}\n\nfunction AuthScreen/)?.[0] || '';
+    const vortexBlock = source.match(/function Vortex\([\s\S]*?\n}\n\nfunction VortexEntry/)?.[0] || '';
+
+    expect(composerBlock).toContain('Save draft');
+    expect(composerBlock).toContain('Schedule');
+    expect(composerBlock).toContain('Scheduling is prepared in the composer');
+    expect(profileBlock).toContain('profile-cover');
+    expect(profileBlock).toContain('Events attended');
+    expect(profileBlock).toContain('Pinned posts');
+    expect(profileBlock).toContain('Share profile');
+    expect(eventCardBlock).toContain('Hosted by');
+    expect(eventCardBlock).toContain('interested');
+    expect(eventCardBlock).toContain('going');
+    expect(eventCardBlock).toContain('event-mini-map');
+    expect(eventCardBlock).toContain('Discussion');
+    expect(vortexBlock).toContain('People');
+    expect(vortexBlock).toContain('Handles');
+    expect(vortexBlock).toContain('Trending searches');
+    expect(settingsBlock).toContain('Appearance');
+    expect(settingsBlock).toContain('Accessibility');
+    expect(settingsBlock).toContain('Blocked users');
+    expect(settingsBlock).toContain('Muted users');
+    expect(settingsBlock).toContain('Connected accounts');
+    expect(settingsBlock).toContain('Help');
+    expect(settingsBlock).toContain('About Portal');
+    expect(styles).toContain('.settings-grid');
+    expect(styles).toContain('.event-mini-map');
+    expect(styles).toContain('.profile-metrics');
   });
 });
