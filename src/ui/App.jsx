@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { eventStatuses, routes, secondaryRoutes, sourceTypes } from '../domain/portal.js';
+import { eventStatuses, eventTypes, routes, secondaryRoutes, sourceTypes } from '../domain/portal.js';
 import { ActionIcon, Icon } from './icons.jsx';
 import {
   archivePortalEvent,
@@ -7,6 +7,7 @@ import {
   changePortalPassword,
   checkPortalHandle,
   createPortalConversation,
+  createPortalEvent,
   createPortalHandleListing,
   createPortalReport,
   createPortalQuoteEcho,
@@ -45,7 +46,6 @@ import {
   confirmPortalHandlePurchase,
   observeHandlePurchases,
   observeHandleRequests,
-  publishPortalReport,
   registerPortalUser,
   registerPortalPostView,
   reservePortalHandle,
@@ -165,8 +165,8 @@ const handleLifecycleSteps = ['Request', 'Payment', 'Safety review', 'Identity c
 export const EVENTS_UNAVAILABLE_MESSAGE = 'Events are temporarily unavailable. Please try again shortly.';
 export const PROFILE_HANDLE_PLACEHOLDER = 'Choose your unique handle';
 const eventRegions = ['World', 'Nearby', 'United Kingdom', 'Europe', 'Africa', 'Americas', 'Asia'];
-const eventCategories = ['All', 'World', 'Weather', 'Transport', 'Public safety', 'Politics', 'Sport', 'Culture', 'Technology'];
-const contributionTabs = ['Overview', 'Timeline', 'Reports', 'Updates', 'Signals', 'Conversation', 'Evidence', 'Sources', 'Contributors', 'Related Events'];
+const eventCategories = ['All', ...eventTypes];
+const contributionTabs = ['Overview', 'Timeline', 'Updates', 'Photos', 'Videos', 'Discussion', 'Reports', 'Sources', 'Contributors', 'Related Events'];
 
 function Brand() { return <a href="#/" className="brand" aria-label="Portal home"><span className="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="#fff" strokeWidth="2" strokeLinecap="round" /><circle cx="12" cy="12" r="4" stroke="#fff" strokeWidth="2" /></svg></span><span className="brand-name desktop-only">Portal</span></a>; }
 function NavLink({ route, current }) { const active = route.path === '/' ? current === '/' : current === route.path || current.startsWith(`${route.path}?`); return <a href={`#${route.path}`} className="nav-item" aria-current={active ? 'page' : undefined}><Icon name={route.icon} /><span>{route.label}</span></a>; }
@@ -181,18 +181,27 @@ function Section({ title, link, children }) { return <section><div className="se
 function Loading({ label = 'Loading Portal...' }) { return <div className="glass card empty-state"><div className="loader" /><p className="body-sm">{label}</p></div>; }
 function ErrorState({ message }) { return <div className="glass card empty-state"><h2 className="display-md">Portal could not load this</h2><p className="body-sm">{message}</p></div>; }
 
+function eventIsGathering(event = {}) {
+  return ['Public Event', 'Community', 'Sport', 'Entertainment', 'Business', 'Education'].includes(event.eventType || event.category);
+}
+function eventDisplayTime(event = {}) {
+  if (event.status === 'Upcoming' && (event.date || event.time)) return event.time ? `Today ${event.time}` : event.date;
+  return relativeTime(event.lastMeaningfulUpdateAt || event.updatedAt || event.startTime || event.createdAt);
+}
 function EventCard({ event, follow, onFollow }) {
-  const eventTime = event.startTime || event.scheduledAt || event.publishedAt || event.createdAt;
-  const host = event.hostName || event.officialSourceName || event.sourceName || event.createdByType || 'Portal record';
   const location = event.locationSummary || event.primaryLocation || event.venue || event.region || 'World';
-  return <article className="glass interactive event-card memory-event-card"><div className="event-preview-orb" style={event.heroImageUrl ? { backgroundImage: `linear-gradient(180deg, rgba(7,9,15,.05), rgba(7,9,15,.55)), url(${event.heroImageUrl})` } : undefined} aria-hidden="true" /><div className="memory-event-content"><div className="inline-meta"><span className={`event-status ${(event.status || '').toLowerCase()}`}>{event.status || 'Developing'}</span>{event.category ? <span className="source-chip">{event.category}</span> : null}{event.confidenceLabel ? <span className="source-chip">{event.confidenceLabel}</span> : null}</div><a href={`#/events/${event.id}`}><strong>{event.title}</strong></a><span className="body-sm">{event.summary}</span><div className="event-card-details"><span>Hosted by {host}</span><span>{exactTime(eventTime)}</span><span>{location}</span><span>{event.interestedCount || 0} interested · {event.goingCount || 0} going</span></div><div className="event-mini-map" aria-label={`Map preview for ${location}`}><span>{location}</span></div><div className="metrics"><span>{event.sourceCount || 0} sources</span><span>{event.contributorCount || 0} contributors</span><span>{event.discussionCount || event.conversationCount || 0} discussions</span><span>{relativeTime(event.lastMeaningfulUpdateAt || event.updatedAt)}</span></div><div className="event-card-actions">{onFollow ? <button className="btn btn-primary btn-sm" type="button" onClick={() => onFollow(event.id, !follow)}>{follow ? 'Following' : 'Follow event'}</button> : null}<a className="btn btn-secondary btn-sm" href={`#/events/${event.id}`}>Discussion</a><button className="btn btn-secondary btn-sm" type="button" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/#/events/${event.id}`).catch(() => {})}>Share</button></div></div></article>;
+  const actor = event.hostName || event.reporterHandle || event.authorHandle || event.createdByType || 'Portal contributor';
+  const status = event.archived ? 'Archived' : event.status || 'Developing';
+  const gathering = eventIsGathering(event);
+  const hero = event.heroImageUrl || event.mediaPreview?.url || event.photos?.[0]?.url || '';
+  return <article className={`glass interactive event-card masonry-event-card event-variant-${String(event.id || '').charCodeAt(0) % 4 || 0}`}><a className="event-media" href={`#/events/${event.id}`} style={hero ? { backgroundImage: `linear-gradient(180deg, rgba(7,9,15,.04), rgba(7,9,15,.62)), url(${hero})` } : undefined} aria-label={event.title}>{event.video?.thumbnailUrl ? <span className="source-chip">Video</span> : null}</a><div className="masonry-event-content"><div className="inline-meta"><span className={`event-status ${status.toLowerCase()}`}>{status}</span><span className="source-chip">{event.eventType || event.category || 'Other'}</span></div><a href={`#/events/${event.id}`}><strong>{event.title}</strong></a>{event.summary ? <p className="body-sm">{event.summary}</p> : null}<div className="event-essential-meta"><span>{location}</span><span>{eventDisplayTime(event)}</span><span>{actor}</span></div><div className="event-card-counts"><span>{event.followerCount || 0} {gathering ? 'interested' : 'following'}</span><span>{event.updateCount || event.timelineCount || 0} updates</span>{gathering ? <span>{event.goingCount || 0} going</span> : null}</div><div className="event-card-actions compact"><button className="btn btn-primary btn-sm" type="button" onClick={() => onFollow?.(event.id, !follow)}>{follow ? 'Following' : gathering ? 'Interested' : 'Follow'}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/#/events/${event.id}`).catch(() => {})}>Share</button></div></div></article>;
 }
 
 function EventCollection({ events, loading, error, empty, onFollow, following = new Set() }) {
-  if (loading) return <Loading label="Finding events..." />;
+  if (loading) return <div className="event-masonry skeleton-masonry">{Array.from({ length: 8 }).map((_, index) => <div className="glass card event-skeleton" key={index} />)}</div>;
   if (error) return <ErrorState message={error} />;
-  if (!events.length) return <div className="glass card empty-state"><h2 className="display-md">{empty}</h2><p className="body-sm">Create a report or event to begin building Portal&apos;s living memory.</p></div>;
-  return <div className="event-grid">{events.map((event) => <EventCard key={event.id} event={event} follow={following.has(event.id)} onFollow={onFollow} />)}</div>;
+  if (!events.length) return <div className="glass card empty-state"><h2 className="display-md">{empty}</h2><p className="body-sm">When something happens, Portal will give it a place in the world timeline.</p></div>;
+  return <div className="event-masonry" aria-label="Masonry event discovery grid">{events.map((event) => <EventCard key={event.id} event={event} follow={following.has(event.id)} onFollow={onFollow} />)}</div>;
 }
 
 function PostMedia({ post }) {
@@ -348,17 +357,29 @@ function PostDetail({ postId, user, echoed, liked, bookmarked, onEcho, onQuote, 
 }
 
 function EventForm({ initial, events, onSubmit, onCancel, busy }) {
-  const [values, setValues] = useState(initial || { title: '', summary: '', status: 'Developing', parentEventId: '' });
+  const [values, setValues] = useState(initial || { title: '', description: '', summary: '', eventType: 'Live Incident', status: 'Live', location: '', automaticGps: false, date: '', time: '', visibility: 'public', parentEventId: '' });
   const [error, setError] = useState('');
-  function submit(event) { event.preventDefault(); if (values.title.trim().length < 3 || values.summary.trim().length < 12) { setError('Use a clear title and a summary of at least 12 characters.'); return; } onSubmit(values); }
-  return <form className="form-stack" onSubmit={submit}><label>Event name<input value={values.title} onChange={(event) => setValues({ ...values, title: event.target.value })} maxLength="120" required /></label><label>Summary<textarea value={values.summary} onChange={(event) => setValues({ ...values, summary: event.target.value })} maxLength="1000" required /></label><label>Status<select value={values.status} onChange={(event) => setValues({ ...values, status: event.target.value })}>{eventStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><label>Parent event<select value={values.parentEventId} onChange={(event) => setValues({ ...values, parentEventId: event.target.value })}><option value="">No parent event</option>{events.filter((event) => event.id !== initial?.id).map((event) => <option value={event.id} key={event.id}>{event.title}</option>)}</select></label>{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="form-actions"><button className="btn btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Save event'}</button>{onCancel ? <button className="btn btn-secondary" type="button" onClick={onCancel}>Cancel</button> : null}</div></form>;
+  function update(field, value) { setValues((current) => ({ ...current, [field]: value })); }
+  function submit(event) { event.preventDefault(); if (values.title.trim().length < 3 || (values.description || values.summary || '').trim().length < 12) { setError('Say what is happening in a clear title and description.'); return; } onSubmit({ ...values, summary: values.summary || values.description }); }
+  return <form className="form-stack event-create-form" onSubmit={submit}><label>Title<input value={values.title} onChange={(event) => update('title', event.target.value)} maxLength="120" required placeholder="What is happening?" /></label><label>Description<textarea value={values.description || values.summary || ''} onChange={(event) => update('description', event.target.value)} maxLength="1000" required /></label><div className="form-grid"><label>Photos<input type="file" accept="image/*" multiple disabled title="Event media upload is coming through Updates." /></label><label>Videos<input type="file" accept="video/*" disabled title="Event media upload is coming through Updates." /></label></div><div className="form-grid"><label>Location<input value={values.location || values.locationSummary || ''} onChange={(event) => update('location', event.target.value)} maxLength="180" placeholder="Place, area or venue" /></label><label className="check-row"><input type="checkbox" checked={Boolean(values.automaticGps)} onChange={(event) => update('automaticGps', event.target.checked)} /> Automatic GPS</label></div><div className="form-grid"><label>Date<input type="date" value={values.date || ''} onChange={(event) => update('date', event.target.value)} /></label><label>Time<input type="time" value={values.time || ''} onChange={(event) => update('time', event.target.value)} /></label></div><div className="form-grid"><label>Category<select value={values.eventType || values.category || 'Other'} onChange={(event) => { update('eventType', event.target.value); update('category', event.target.value); }}>{eventTypes.map((type) => <option key={type}>{type}</option>)}</select></label><label>Status<select value={values.status} onChange={(event) => update('status', event.target.value)}>{eventStatuses.map((status) => <option key={status}>{status}</option>)}</select></label></div><label>Visibility<select value={values.visibility || 'public'} onChange={(event) => update('visibility', event.target.value)}><option value="public">Public</option><option value="followers">Followers</option><option value="private">Private</option></select></label><label>Related parent event<select value={values.parentEventId || ''} onChange={(event) => update('parentEventId', event.target.value)}><option value="">No parent event</option>{events.filter((event) => event.id !== initial?.id).map((event) => <option value={event.id} key={event.id}>{event.title}</option>)}</select></label>{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="form-actions"><button className="btn btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Create event'}</button>{onCancel ? <button className="btn btn-secondary" type="button" onClick={onCancel}>Cancel</button> : null}</div></form>;
 }
 
 function Events({ user, eventState, onFollow, following, onCreate }) {
-  const [status, setStatus] = useState('All'); const [region, setRegion] = useState('World'); const [category, setCategory] = useState('All'); const [time, setTime] = useState('Active'); const [view, setView] = useState('List');
-  const filtered = eventState.events.filter((event) => status === 'All' || event.status === status).filter((event) => region === 'World' || event.region === region || event.country === region || event.geographicScope === region).filter((event) => category === 'All' || event.category === category).filter((event) => time !== 'Followed' || following.has(event.id)).filter((event) => time !== 'Active' || ['Breaking', 'Developing', 'Confirmed'].includes(event.status));
-  const activeGlobalEvents = eventState.events.filter((event) => ['Breaking', 'Developing', 'Confirmed'].includes(event.status)).slice(0, 8);
-  return <div className="page events-page"><div className="welcome-head"><div><h1 className="display-xl">Events</h1><p className="body-md">Real happenings, organised by evidence, sources, status and relationship.</p></div><button type="button" className="btn btn-primary" onClick={onCreate}>Create event</button></div><Section title="Happening around the world"><div className="chip-row subtle-row">{eventRegions.map((item) => <button type="button" className={`chip ${region === item ? 'active' : ''}`} onClick={() => setRegion(item)} key={item}>{item}</button>)}</div><EventCollection events={activeGlobalEvents} loading={eventState.loading} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="No active global Events yet" onFollow={onFollow} following={following} /></Section><Section title="Browse Events"><div className="filter-grid"><div><span className="eyebrow">Status</span><div className="chip-row">{['All', ...eventStatuses].map((item) => <button type="button" className={`chip ${status === item ? 'active' : ''}`} onClick={() => setStatus(item)} key={item}>{item}</button>)}</div></div><div><span className="eyebrow">Category</span><div className="chip-row">{eventCategories.map((item) => <button type="button" className={`chip ${category === item ? 'active' : ''}`} onClick={() => setCategory(item)} key={item}>{item}</button>)}</div></div><div><span className="eyebrow">Time and view</span><div className="chip-row">{['Active', '24h', '7d', 'Followed'].map((item) => <button type="button" className={`chip ${time === item ? 'active' : ''}`} onClick={() => setTime(item)} key={item}>{item}</button>)}{['List', 'World view'].map((item) => <button type="button" className={`chip ${view === item ? 'active' : ''}`} onClick={() => setView(item)} key={item}>{item}</button>)}</div></div></div></Section>{view === 'World view' ? <div className="glass card global-map-placeholder"><h2 className="display-md">World view</h2><p className="body-sm">Map rendering will appear when location-rich Events are available. The list below remains the source of truth.</p></div> : null}<Section title="Events happening now"><EventCollection events={filtered} loading={eventState.loading} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="No matching Events" onFollow={onFollow} following={following} /></Section><p className="body-sm">Signed in as {user.email}</p></div>;
+  const [filter, setFilter] = useState('Live'); const [region, setRegion] = useState('World'); const [category, setCategory] = useState('All');
+  const now = Date.now();
+  const filtered = eventState.events.filter((event) => region === 'World' || event.region === region || event.country === region || event.geographicScope === region || event.locationSummary === region).filter((event) => category === 'All' || event.category === category || event.eventType === category).filter((event) => {
+    const status = event.archived ? 'Archived' : event.status;
+    if (filter === 'Nearby') return true;
+    if (filter === 'Live') return ['Live', 'Developing'].includes(status);
+    if (filter === 'Breaking') return event.eventType === 'Breaking News' || status === 'Live';
+    if (filter === 'Today') { const time = event.startTime?.toDate ? event.startTime.toDate().getTime() : event.createdAt?.toDate ? event.createdAt.toDate().getTime() : now; return Math.abs(now - time) < 24 * 60 * 60_000; }
+    if (filter === 'Upcoming') return status === 'Upcoming';
+    if (filter === 'Following') return following.has(event.id);
+    if (filter === 'Trending') return Number(event.followerCount || 0) + Number(event.updateCount || 0) > 0;
+    if (filter === 'Archived') return status === 'Archived' || status === 'Resolved';
+    return true;
+  });
+  return <div className="page events-page"><div className="welcome-head"><div><h1 className="display-xl">What is happening?</h1><p className="body-md">Portal Events is the world&apos;s timeline: incidents, culture, sport, weather, government, community and everything unfolding around us.</p></div><button type="button" className="btn btn-primary" onClick={onCreate}>Create event</button></div><div className="event-discovery-controls glass card"><div><span className="eyebrow">Discovery</span><div className="chip-row">{['Nearby', 'Live', 'Breaking', 'Today', 'Upcoming', 'Following', 'Trending', 'Archived'].map((item) => <button type="button" className={`chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div></div><div><span className="eyebrow">Region</span><div className="chip-row">{eventRegions.map((item) => <button type="button" className={`chip ${region === item ? 'active' : ''}`} onClick={() => setRegion(item)} key={item}>{item}</button>)}</div></div><div><span className="eyebrow">Type</span><div className="chip-row">{eventCategories.map((item) => <button type="button" className={`chip ${category === item ? 'active' : ''}`} onClick={() => setCategory(item)} key={item}>{item}</button>)}</div></div></div><Section title="Happening now"><EventCollection events={filtered} loading={eventState.loading} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="Nothing matching this view yet" onFollow={onFollow} following={following} /></Section><p className="body-sm">Signed in as {user.email}</p></div>;
 }
 
 function EventDetail({ eventId, user, events, onFollow, following }) {
@@ -694,27 +715,20 @@ function AuthErrorCard({ error }) {
   return <section className="auth-error-card" role="alert" aria-live="assertive"><strong>{error.title}</strong><p>{error.body}</p></section>;
 }
 
-function CreateModal({ open, onClose, user, profile, events }) {
-  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [progress, setProgress] = useState({});
-  const [values, setValues] = useState({ title: '', description: '', location: '', occurredAt: '', identityMode: 'Reporter', eventId: '', eventTitle: '', photo: null, video: null });
+function CreateModal({ open, onClose, user, events }) {
+  const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   if (!open) return null;
-  if (!profile?.normalizedHandle) return <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="identityRequiredTitle" onMouseDown={onClose}><div className="modal form-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><h2 id="identityRequiredTitle">Choose your Portal identity</h2><button className="modal-close" type="button" onClick={onClose} aria-label="Close">×</button></div><p className="body-md">This is how people will recognise, mention and find you across Portal.</p><div className="form-actions"><a className="btn btn-primary" href="#/profile" onClick={onClose}>Create profile</a><button className="btn btn-secondary" type="button" onClick={onClose}>Not now</button></div></div></div>;
-  function update(field, value) { setValues((current) => ({ ...current, [field]: value })); }
-  function pickMedia(kind, file) {
-    if (!file) return update(kind, null);
-    const expected = kind === 'photo' ? 'image/' : 'video/';
-    const limitMb = kind === 'photo' ? 25 : 100;
-    if (!file.type.startsWith(expected) || file.size > limitMb * 1024 * 1024) { setError(`${kind === 'photo' ? 'Photos' : 'Videos'} must be a valid ${kind} under ${limitMb} MB.`); return; }
-    setError(''); update(kind, file);
-  }
-  async function submit(event) {
-    event.preventDefault();
+  async function submit(values) {
     if (busy) return;
-    if (values.title.trim().length < 3 || values.description.trim().length < 12 || (!values.eventId && values.eventTitle.trim().length < 3)) { setError('Give the report some substance, then attach it to an event or name the new happening.'); return; }
     setBusy(true); setError('');
-    try { const record = await publishPortalReport(user, values, (kind, amount) => setProgress((current) => ({ ...current, [kind]: amount }))); onClose(); window.location.hash = `#/events/${record.eventId}`; } catch (reason) { setError(firebaseMessage(reason)); } finally { setBusy(false); }
+    try {
+      const created = await createPortalEvent(user, values);
+      onClose();
+      window.location.hash = `#/events/${created.id}`;
+    } catch (reason) { setError(firebaseMessage(reason)); }
+    finally { setBusy(false); }
   }
-  return <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="createModalTitle" onMouseDown={onClose}><div className="modal form-modal report-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><h2 id="createModalTitle">Report a happening</h2><p className="body-sm">Give history something better than a vague group chat memory.</p></div><button className="modal-close" type="button" onClick={onClose} aria-label="Close">×</button></div>{error ? <p className="form-error" role="alert">{error}</p> : null}<form className="form-stack" onSubmit={submit}><label>Report title<input value={values.title} onChange={(event) => update('title', event.target.value)} maxLength="120" required /></label><label>What happened?<textarea value={values.description} onChange={(event) => update('description', event.target.value)} maxLength="2000" required /></label><div className="form-grid"><label>Location<input value={values.location} onChange={(event) => update('location', event.target.value)} maxLength="180" placeholder="Where it happened" /></label><label>Date and time<input type="datetime-local" value={values.occurredAt} onChange={(event) => update('occurredAt', event.target.value)} /></label></div><fieldset className="identity-mode"><legend>How should Portal frame this?</legend>{['Reporter', 'Casual'].map((mode) => <label key={mode}><input type="radio" name="identity" checked={values.identityMode === mode} onChange={() => update('identityMode', mode)} /> {mode}</label>)}</fieldset><label>Attach to an event<select value={values.eventId} onChange={(event) => update('eventId', event.target.value)}><option value="">Create a new event from this report</option>{events.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>{!values.eventId ? <label>New event name<input value={values.eventTitle} onChange={(event) => update('eventTitle', event.target.value)} maxLength="120" placeholder="The happening this belongs to" required /></label> : null}<div className="form-grid media-inputs"><label>Photo evidence<input type="file" accept="image/*" onChange={(event) => pickMedia('photo', event.target.files?.[0])} /></label><label>Video evidence<input type="file" accept="video/*" onChange={(event) => pickMedia('video', event.target.files?.[0])} /></label></div>{values.photo || values.video ? <p className="body-sm">{values.photo?.name || ''}{values.photo && values.video ? ' · ' : ''}{values.video?.name || ''}{progress.photo ? ` · Photo ${progress.photo}%` : ''}{progress.video ? ` · Video ${progress.video}%` : ''}</p> : null}<div className="form-actions"><button className="btn btn-primary" disabled={busy}>{busy ? 'Publishing evidence...' : 'Publish report'}</button><button className="btn btn-secondary" type="button" onClick={onClose} disabled={busy}>Cancel</button></div></form></div></div>;
+  return <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="createModalTitle" onMouseDown={onClose}><div className="modal form-modal report-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><h2 id="createModalTitle">Create event</h2><p className="body-sm">What is happening?</p></div><button className="modal-close" type="button" onClick={onClose} aria-label="Close">×</button></div>{error ? <p className="form-error" role="alert">{error}</p> : null}<EventForm events={events} onSubmit={submit} onCancel={onClose} busy={busy} /></div></div>;
 }
 
 function PublicProfile({ handle }) {

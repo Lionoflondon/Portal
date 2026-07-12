@@ -93,8 +93,31 @@ describe('Portal app shell', () => {
     expect(homeBlock).not.toContain('Happening around the world');
     expect(homeBlock).not.toContain('Events happening now');
     expect(homeBlock).not.toContain('EventCollection');
-    expect(eventsBlock).toContain('Happening around the world');
-    expect(eventsBlock).toContain('Events happening now');
+    expect(eventsBlock).toContain('What is happening?');
+    expect(eventsBlock).toContain("['Nearby', 'Live', 'Breaking', 'Today', 'Upcoming', 'Following', 'Trending', 'Archived']");
+    expect(eventsBlock).toContain('EventCollection');
+  });
+
+
+  it('locks Portal Events to the world-timeline masonry model', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const domain = readFileSync(resolve('src/domain/portal.js'), 'utf8');
+    const formBlock = source.match(/function EventForm\([\s\S]*?\n}\n\nfunction Events/)?.[0] || '';
+    expect(domain).toContain("'Live Incident'");
+    expect(domain).toContain("'Breaking News'");
+    expect(domain).toContain("'Weather'");
+    expect(domain).toContain("'Archived'");
+    expect(formBlock).toContain('What is happening?');
+    expect(formBlock).toContain('Automatic GPS');
+    expect(formBlock).toContain('Visibility');
+    expect(formBlock).toContain('Public');
+    expect(formBlock).toContain('Followers');
+    expect(formBlock).toContain('Private');
+    expect(styles).toContain('.event-masonry{column-count:5');
+    expect(styles).toContain('@media (min-width:1500px){.event-masonry{column-count:6}}');
+    expect(styles).toContain('@media (max-width:640px){.event-masonry{column-count:2');
+    expect(styles).toContain('break-inside:avoid');
   });
 
   it('keeps handle purchasing inside Marketplace with development payment copy', () => {
@@ -434,11 +457,13 @@ describe('Portal app shell', () => {
     expect(profileBlock).toContain('Events attended');
     expect(profileBlock).toContain("['Posts', 'Replies', 'Media']");
     expect(profileBlock).toContain('Share Profile');
-    expect(eventCardBlock).toContain('Hosted by');
+    expect(eventCardBlock).toContain('masonry-event-card');
+    expect(eventCardBlock).toContain('event-media');
+    expect(eventCardBlock).toContain('event-essential-meta');
     expect(eventCardBlock).toContain('interested');
-    expect(eventCardBlock).toContain('going');
-    expect(eventCardBlock).toContain('event-mini-map');
-    expect(eventCardBlock).toContain('Discussion');
+    expect(eventCardBlock).toContain('following');
+    expect(eventCardBlock).toContain('Share');
+    expect(eventCardBlock).not.toContain('event-mini-map');
     expect(vortexBlock).toContain('People');
     expect(vortexBlock).toContain('Handles');
     expect(vortexBlock).toContain('Trending searches');

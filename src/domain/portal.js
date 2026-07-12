@@ -1,4 +1,5 @@
-export const eventStatuses = ['Breaking', 'Developing', 'Confirmed', 'Resolved', 'Historic'];
+export const eventStatuses = ['Upcoming', 'Live', 'Developing', 'Resolved', 'Archived', 'Cancelled'];
+export const eventTypes = ['Live Incident', 'Public Event', 'Community', 'Breaking News', 'Sport', 'Entertainment', 'Travel', 'Government', 'Weather', 'Business', 'Education', 'Health', 'Other'];
 export const sourceTypes = ['Eyewitness', 'Official', 'Media', 'Opinion', 'Community'];
 
 export const routes = [

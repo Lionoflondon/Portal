@@ -158,27 +158,52 @@ export function observeEvent(eventId, callback, onError) {
 }
 
 export async function createPortalEvent(user, values) {
+  const eventStatus = values.status || (values.date || values.time ? 'Upcoming' : 'Live');
+  const startTime = values.date || values.time ? Timestamp.fromDate(new Date(`${values.date || new Date().toISOString().slice(0, 10)}T${values.time || '00:00'}`)) : serverTimestamp();
   return addDoc(collection(requireService(portalDb, 'Firestore'), 'events'), {
     title: values.title.trim(),
-    summary: values.summary.trim(),
-    status: values.status,
+    summary: (values.summary || values.description || '').trim(),
+    description: (values.description || values.summary || '').trim(),
+    status: eventStatus,
+    eventType: values.eventType || values.category || 'Other',
+    category: values.category || values.eventType || 'Other',
+    locationSummary: values.location || '',
+    primaryLocation: values.location || '',
+    automaticGpsRequested: Boolean(values.automaticGps),
+    date: values.date || '',
+    time: values.time || '',
+    startTime,
+    visibility: values.visibility || 'public',
     parentEventId: values.parentEventId || null,
     archived: false,
-    visibility: 'public',
     moderationState: 'approved',
+    followerCount: 0,
+    updateCount: 1,
+    viewCount: 0,
+    shareCount: 0,
+    media: { photoCount: values.photoCount || 0, hasVideo: Boolean(values.videoCount) },
     publishedAt: serverTimestamp(),
     createdBy: user.uid,
     authorUid: user.uid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+    lastMeaningfulUpdateAt: serverTimestamp(),
   });
 }
 
 export function updatePortalEvent(eventId, values) {
   return updateDoc(doc(requireService(portalDb, 'Firestore'), 'events', eventId), {
     title: values.title.trim(),
-    summary: values.summary.trim(),
+    summary: (values.summary || values.description || '').trim(),
+    description: (values.description || values.summary || '').trim(),
     status: values.status,
+    eventType: values.eventType || values.category || 'Other',
+    category: values.category || values.eventType || 'Other',
+    locationSummary: values.location || values.locationSummary || '',
+    primaryLocation: values.location || values.primaryLocation || '',
+    date: values.date || '',
+    time: values.time || '',
+    visibility: values.visibility || 'public',
     parentEventId: values.parentEventId || null,
     updatedAt: serverTimestamp(),
   });
