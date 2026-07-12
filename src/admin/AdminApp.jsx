@@ -11,6 +11,7 @@ import {
   observeVortexEntries,
   reclaimPortalHandle,
   refundPlaceholderPortalHandlePurchase,
+  reviewPortalHandleRequest,
   sendPortalPasswordReset,
   signInPortalUser,
   signInPortalUserWithGoogle,
@@ -200,20 +201,53 @@ function AdminPasswordPanel() {
   return <section className="glass card"><h2 className="display-md">Account security</h2><form className="form-stack" onSubmit={save}><label>New password<span className="password-field"><input type={show ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /><button type="button" className="password-toggle" onClick={() => setShow((visible) => !visible)} aria-label={show ? 'Hide password' : 'Show password'}>{show ? 'Hide' : 'Show'}</button></span></label><label>Confirm password<input type={show ? 'text' : 'password'} value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" /></label>{error ? <p className="form-error" role="alert">{error}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<button className="btn btn-primary" disabled={busy || !password || !confirm}>{busy ? 'Changing...' : 'Change password'}</button></form></section>;
 }
 
-function AdminHandleRegistry() {
+const marketplaceSubsections = ['Overview', 'Handle Registry', 'Purchase Requests', 'Transfer Requests', 'Reserved Handles', 'Protected Handles', 'Premium Handles', 'Brand Claims', 'Ownership Disputes', 'Pricing', 'Users and Ownership', 'Audit Log', 'Settings'];
+const handleTypes = ['Standard', 'Premium', 'Brand', 'Company', 'Institution', 'Public Interest', 'Government', 'Emergency Service', 'Celebrity', 'Staff', 'Moderator', 'System', 'Legacy', 'Permanently Reserved'];
+const handleStatuses = ['Available', 'Requested', 'Pending Approval', 'Approved for Purchase', 'Payment Pending', 'Active', 'Reserved', 'Protected', 'Suspended', 'Locked', 'Under Review', 'Transfer Pending', 'Rescinded', 'Released', 'Expired', 'Retired'];
+const handleFilters = ['Available', 'Owned', 'Pending', 'Premium', 'Protected', 'Reserved', 'Suspended', 'Expired', 'Disputed', 'Locked', 'Unverified Owner', 'Renewal Due'];
+const handleAdminActions = ['Approve Handle Request', 'Reject', 'Reserve', 'Protect', 'Reclaim', 'Rescind', 'Suspend', 'Transfer', 'Reassign', 'Lock', 'Unlock', 'Rename', 'Release', 'Retire'];
+const handleRegistryColumns = ['Handle', 'Display Name', 'Current Owner', 'Owner User ID', 'Handle Type', 'Status', 'Price', 'Renewal Price', 'Reserved Reason', 'Verification Status', 'Created Date', 'Acquired Date', 'Expiry Date', 'Last Changed', 'Admin Lock', 'Risk Flags'];
+
+function handleStatus(record = {}) {
+  const status = record.status || record.approvalState || record.listingStatus || record.transferStatus || 'available';
+  return String(status).replaceAll('_', ' ');
+}
+
+function normalizeRegistryHandle(item = {}) {
+  return item.normalizedHandle || item.handleId || item.id || item.displayHandle?.replace(/^@/, '') || '';
+}
+
+function AdminHandleMarketplace() {
   const [term, setTerm] = useState('');
   const [record, setRecord] = useState(null);
+  const [activeSection, setActiveSection] = useState('Overview');
+  const [filter, setFilter] = useState('Owned');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [action, setAction] = useState('protect');
   const [category, setCategory] = useState('brand');
   const [notes, setNotes] = useState('');
+  const [price, setPrice] = useState('');
+  const [renewalPrice, setRenewalPrice] = useState('');
+  const [currency, setCurrency] = useState('GBP');
   const [reclaimOpen, setReclaimOpen] = useState(false);
   const [reason, setReason] = useState('impersonation');
   const [outcome, setOutcome] = useState('mark_protected');
   const [claimantUid, setClaimantUid] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [highRiskConfirmed, setHighRiskConfirmed] = useState(false);
+  const handles = useAdminCollection('handles', 250);
+  const listings = useAdminCollection('handleListings', 150);
+  const requests = useAdminCollection('handleRequests', 150);
+  const purchases = useAdminCollection('handlePurchases', 150);
+  const transfers = useAdminCollection('handleTransfers', 150);
+  const disputes = useAdminCollection('handleDisputes', 100);
+  const protectedHandles = useAdminCollection('protectedHandles', 150);
+  const reservedHandles = useAdminCollection('reservedHandles', 150);
+  const claims = useAdminCollection('protectedHandleClaims', 100);
+  const audits = useAdminCollection('auditLogs', 150);
+  const policies = useAdminCollection('handlePolicies', 150);
 
   async function refresh(handle = record?.normalizedHandle || term) {
     setRecord(await getPortalAdminHandle(handle));
@@ -222,34 +256,117 @@ function AdminHandleRegistry() {
   async function search(event) {
     event.preventDefault();
     setBusy(true); setError('');
-    try { await refresh(term); } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
+    try { await refresh(term); setActiveSection('Handle Registry'); } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
   }
 
   async function manage(event) {
     event.preventDefault();
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
-      await managePortalHandleRegistry({ handle: record.normalizedHandle, action, category, notes, ...(action === 'verify_owner' ? { verifiedUid: claimantUid } : {}) });
+      await managePortalHandleRegistry({ handle: record.normalizedHandle, action, category, notes, priceAmount: price ? Number(price) : null, renewalPriceAmount: renewalPrice ? Number(renewalPrice) : null, currency, ...(action === 'verify_owner' ? { verifiedUid: claimantUid } : {}) });
       await refresh(record.normalizedHandle);
+      setNotice(`Registry action ${action.replaceAll('_', ' ')} completed.`);
     } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
   }
 
   async function reclaim(event) {
     event.preventDefault();
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       await reclaimPortalHandle({ handle: record.normalizedHandle, reason, notes, outcome, claimantUid: claimantUid || null, confirmation, highRiskConfirmed });
       setReclaimOpen(false);
       await refresh(record.normalizedHandle);
+      setNotice(`@${record.normalizedHandle} reclaimed with outcome ${outcome.replaceAll('_', ' ')}.`);
     } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
   }
 
   async function refundPurchase(purchaseId) {
-    setBusy(true); setError('');
-    try { await refundPlaceholderPortalHandlePurchase(purchaseId); await refresh(record.normalizedHandle); } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
+    setBusy(true); setError(''); setNotice('');
+    try { await refundPlaceholderPortalHandlePurchase(purchaseId); await refresh(record.normalizedHandle); setNotice('Placeholder purchase refunded.'); } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
   }
 
-  return <div className="page"><div><h1 className="display-xl">Handle management</h1><p className="body-md">Complete Handle Marketplace administration for reserved handles, protected handles, government handles, emergency handles, brand handles, marketplace listings, transfer requests, recovery requests, disputes, premium handles and ownership timeline.</p></div><form className="glass card form-stack" onSubmit={search}><label>Search handle<input value={term} onChange={(event) => setTerm(event.target.value.replace(/^@/, ''))} placeholder="@handle" /></label><button className="btn btn-primary" disabled={busy || !term.trim()}>Search registry</button></form>{error ? <p className="form-error" role="alert">{error}</p> : null}{record ? <><section className="glass card marketplace-card"><div><h2 className="display-lg">@{record.normalizedHandle}</h2><p className="body-sm">{record.protected?.status || record.reserved?.status || record.policy?.status || record.handle?.status || 'available'}</p></div><div className="metrics"><span>{record.protected?.category || record.reserved?.category || record.policy?.category || record.handle?.marketplaceClass || 'unclassified'}</span><span>{record.handle?.ownerUid ? 'Owned' : 'No active owner'}</span></div><div className="admin-action-grid">{['Reserve', 'Release', 'Transfer', 'Recover', 'Blacklist', 'Lock', 'Unlock', 'Feature'].map((item) => <button className="btn btn-secondary btn-sm" type="button" key={item}>{item}</button>)}</div></section><section className="glass card"><h2 className="display-md">Identity risk review</h2>{record.requests?.length ? <div className="stack">{record.requests.map((item) => <article className="glass card compact-empty" key={item.id || item.requestId}><div className="inline-meta"><span className="source-chip">{item.requestType}</span><span className="source-chip">{item.status}</span><span className="source-chip">{item.riskBand}</span></div><p className="body-sm">Risk score {item.riskScore} · Email {item.emailVerified ? 'verified' : 'not verified'} · Phone {item.phoneVerified ? 'verified' : 'not verified'}</p><p className="body-sm">Device matches {item.deviceMatchCount || 0} · Browser matches {item.browserMatchCount || 0}</p><p className="body-sm">{(item.riskReasons || []).map((itemReason) => itemReason.code).join(', ') || 'No risk reasons recorded.'}</p></article>)}</div> : <p className="body-sm">No handle risk reviews recorded for this handle.</p>}</section><section className="glass card"><h2 className="display-md">Handle purchases</h2>{record.purchases?.length ? <div className="stack">{record.purchases.map((item) => <article className="glass card compact-empty" key={item.id || item.purchaseId}><div className="inline-meta"><span className="source-chip">{item.paymentProviderMode || item.provider || 'unknown provider'}</span><span className="source-chip">{item.paymentStatus || item.status}</span><span className="source-chip">{item.issuanceState || 'not issued'}</span></div><p className="body-sm">{formatMoney(item.amountMinor, item.currency)} · Buyer {item.uid} · Renewal {timeLabel(item.renewalDate)}</p>{item.paymentProviderMode === 'placeholder' && item.paymentStatus !== 'refunded' ? <button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => refundPurchase(item.purchaseId || item.id)}>Refund placeholder purchase</button> : null}</article>)}</div> : <p className="body-sm">No purchases recorded for this handle.</p>}</section><section className="glass card"><h2 className="display-md">Registry action</h2><form className="form-stack" onSubmit={manage}><label>Action<select value={action} onChange={(event) => setAction(event.target.value)}>{['protect', 'reserve', 'marketplace', 'release', 'retire', 'verify_owner'].map((item) => <option key={item} value={item}>{item.replaceAll('_', ' ')}</option>)}</select></label><label>Category<input value={category} onChange={(event) => setCategory(event.target.value)} /></label>{action === 'verify_owner' ? <label>Verified owner UID<input value={claimantUid} onChange={(event) => setClaimantUid(event.target.value)} /></label> : null}<label>Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label><button className="btn btn-secondary" disabled={busy}>Apply registry action</button></form></section><section className="glass card"><h2 className="display-md">Enforcement</h2><p className="body-sm">Reclaim Handle requires a reason, internal notes and typed confirmation.</p><button className="btn btn-primary" type="button" onClick={() => setReclaimOpen(true)}>Reclaim Handle</button></section>{reclaimOpen ? <section className="glass card"><h2 className="display-md">Reclaim @{record.normalizedHandle}</h2><form className="form-stack" onSubmit={reclaim}><label>Reason<select value={reason} onChange={(event) => setReason(event.target.value)}>{['impersonation', 'trademark', 'fraud', 'abuse', 'legal_compliance', 'public_interest', 'system_use', 'enforcement'].map((item) => <option key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label><label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}>{['mark_protected', 'permanently_reserve', 'assign_verified_claimant', 'assign_portal_account', 'return_to_marketplace', 'release_to_availability'].map((item) => <option key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label>{outcome.includes('assign_') ? <label>Receiving Portal UID<input value={claimantUid} onChange={(event) => setClaimantUid(event.target.value)} /></label> : null}<label>Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} required minLength="8" /></label><label>Type RECLAIM @{record.normalizedHandle}<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label><label className="check-row"><input type="checkbox" checked={highRiskConfirmed} onChange={(event) => setHighRiskConfirmed(event.target.checked)} /> I confirm this may be a high-risk reclaim.</label><div className="form-actions"><button className="btn btn-primary" disabled={busy}>Confirm reclaim</button><button className="btn btn-secondary" type="button" onClick={() => setReclaimOpen(false)}>Cancel</button></div></form></section> : null}</> : null}</div>;
+  async function reviewRequest(item, reviewAction) {
+    const internalNotes = notes.trim() || `Admin marketplace action: ${reviewAction.replaceAll('_', ' ')}`;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await reviewPortalHandleRequest({ requestId: item.requestId || item.id, action: reviewAction, notes: internalNotes, alternativeHandle: claimantUid || null });
+      setNotice(`${reviewAction.replaceAll('_', ' ')} recorded for @${item.normalizedHandle}.`);
+      if (record?.normalizedHandle === item.normalizedHandle) await refresh(record.normalizedHandle);
+    } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
+  }
+
+  async function auditOnlyAction(label, target = record?.normalizedHandle) {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await runAdminAction(label.toLowerCase().replaceAll(' ', '_'), { entityType: 'handle_marketplace', targetId: target || null, reason: notes.trim() || `Handle Marketplace: ${label}` });
+      setNotice(`${label} recorded through Admin audit.`);
+    } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
+  }
+
+  const registryRows = [...handles.items, ...reservedHandles.items, ...protectedHandles.items, ...policies.items].reduce((map, item) => {
+    const key = normalizeRegistryHandle(item);
+    if (!key) return map;
+    map.set(key, { ...map.get(key), ...item, normalizedHandle: key });
+    return map;
+  }, new Map());
+  const rows = [...registryRows.values()];
+  const filteredRows = rows.filter((item) => {
+    const haystack = JSON.stringify(item).toLowerCase();
+    const termMatch = !term.trim() || haystack.includes(term.toLowerCase().replace(/^@/, ''));
+    const statusText = handleStatus(item).toLowerCase();
+    const classText = String(item.marketplaceClass || item.category || item.handleType || '').toLowerCase();
+    const filterMatch = filter === 'Owned' ? Boolean(item.ownerUid || item.uid) : filter === 'Available' ? statusText.includes('available') : filter === 'Pending' ? statusText.includes('pending') || statusText.includes('requested') : filter === 'Premium' ? classText.includes('premium') : filter === 'Protected' ? statusText.includes('protected') || classText.includes('protected') : filter === 'Reserved' ? statusText.includes('reserved') : filter === 'Suspended' ? statusText.includes('suspended') : filter === 'Expired' ? statusText.includes('expired') : filter === 'Disputed' ? item.disputeState || statusText.includes('dispute') : filter === 'Locked' ? item.adminLock || statusText.includes('locked') : filter === 'Unverified Owner' ? Boolean(item.ownerUid || item.uid) && item.verificationState !== 'verified' : filter === 'Renewal Due' ? Boolean(item.renewalDate || item.expiresAt) : true;
+    return termMatch && filterMatch;
+  });
+  const ownedCount = rows.filter((item) => item.ownerUid || item.uid).length;
+  const availableCount = rows.filter((item) => handleStatus(item).toLowerCase().includes('available')).length;
+  const reservedCount = reservedHandles.items.length + rows.filter((item) => handleStatus(item).toLowerCase().includes('reserved')).length;
+  const protectedCount = protectedHandles.items.length + rows.filter((item) => handleStatus(item).toLowerCase().includes('protected')).length;
+  const premiumCount = rows.filter((item) => String(item.marketplaceClass || item.category || item.handleType || '').toLowerCase().includes('premium')).length;
+  const pendingPurchaseRequests = requests.items.filter((item) => ['pending_review', 'pending approval', 'requested'].includes(String(item.status || item.approvalState || '').toLowerCase())).length;
+  const pendingTransferRequests = transfers.items.filter((item) => String(item.status || item.transferStatus || '').toLowerCase().includes('pending')).length;
+  const handleRevenue = purchases.items.reduce((total, item) => total + Number(item.amountMinor || item.grossSaleAmount || 0), 0);
+  const kpis = [
+    ['Total Registered Handles', rows.length],
+    ['Active Owned Handles', ownedCount],
+    ['Available Handles', availableCount],
+    ['Reserved Handles', reservedCount],
+    ['Protected Handles', protectedCount],
+    ['Premium Handles', premiumCount],
+    ['Handles Listed for Purchase', listings.items.length],
+    ['Pending Purchase Requests', pendingPurchaseRequests],
+    ['Pending Transfer Requests', pendingTransferRequests],
+    ['Pending Brand Claims', claims.items.filter((item) => String(item.status || '').includes('pending')).length],
+    ['Suspended Handles', rows.filter((item) => handleStatus(item).toLowerCase().includes('suspended')).length],
+    ['Rescinded Handles', requests.items.filter((item) => String(item.status || '').toLowerCase().includes('rescinded')).length],
+    ['Expired Handles', rows.filter((item) => handleStatus(item).toLowerCase().includes('expired')).length],
+    ['Handle Revenue', formatMoney(handleRevenue)],
+    ['Renewals Due', rows.filter((item) => item.renewalDate || item.expiresAt).length],
+    ['Ownership Disputes', disputes.items.length],
+  ];
+  const recentActivity = [...requests.items.map((item) => ({ ...item, activityType: 'New handle reservation' })), ...purchases.items.map((item) => ({ ...item, activityType: 'Purchase' })), ...transfers.items.map((item) => ({ ...item, activityType: item.type || 'Transfer' })), ...audits.items.filter((item) => String(item.system || '').includes('handle')).map((item) => ({ ...item, activityType: item.action || 'Registry audit' }))].sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)).slice(0, 10);
+  const handleDetail = record ? {
+    exactHandle: `@${record.normalizedHandle}`,
+    normalizedHandle: record.normalizedHandle,
+    displayCasing: record.handle?.originalHandle || record.protected?.displayHandle || record.reserved?.displayHandle || `@${record.normalizedHandle}`,
+    currentOwner: record.handle?.ownerUid || record.handle?.uid || 'No active owner',
+    previousOwners: record.handle?.previousOwnerUid || 'None recorded',
+    handleType: record.policy?.category || record.protected?.category || record.reserved?.category || record.handle?.handleType || record.handle?.marketplaceClass || 'Standard',
+    currentStatus: record.protected?.status || record.reserved?.status || record.policy?.status || record.handle?.status || 'available',
+    purchasePrice: formatMoney(record.policy?.priceAmount ?? record.listing?.askingPriceAmount ?? record.purchases?.[0]?.amountMinor),
+    renewalFee: formatMoney(record.policy?.renewalPriceAmount ?? record.purchases?.[0]?.renewalAmountMinor),
+    acquisitionMethod: record.handle?.freeHandle ? 'Free handle' : record.purchases?.[0]?.paymentProviderMode || record.handle?.status || 'Registry',
+    ownershipStartDate: timeLabel(record.handle?.reservedAt || record.handle?.lastTransferredAt),
+    expiryOrRenewalDate: timeLabel(record.purchases?.[0]?.renewalDate || record.policy?.expiresAt),
+    verificationStatus: record.handle?.verificationState || record.requests?.[0]?.approvalState || 'unverified',
+    protectionReason: record.protected?.protectedReason || record.protected?.notes || '—',
+    reservationReason: record.reserved?.reservedReason || record.reserved?.notes || '—',
+    brandAssociation: record.protected?.brandAssociation || record.policy?.brandAssociation || '—',
+    fullOwnershipTimeline: record.transfers?.length ? `${record.transfers.length} ownership timeline entries` : 'No ownership timeline entries recorded',
+    adminNotes: record.protected?.notes || record.reserved?.notes || record.policy?.notes || '—',
+  } : null;
+
+  return <div className="page handle-marketplace-admin"><div><h1 className="display-xl">Marketplace</h1><p className="body-md">Portal Handle Marketplace and Handle Registry control. This is not a product marketplace: no products, shops, carts, shipping, delivery, stock or physical-goods orders.</p></div><div className="marketplace-subnav" role="tablist">{marketplaceSubsections.map((item) => <button className={`source-chip ${activeSection === item ? 'active' : ''}`} role="tab" aria-selected={activeSection === item} type="button" onClick={() => setActiveSection(item)} key={item}>{item}</button>)}</div><form className="glass card form-stack" onSubmit={search}><label>Search handle<input value={term} onChange={(event) => setTerm(event.target.value.replace(/^@/, ''))} placeholder="@handle" /></label><button className="btn btn-primary" disabled={busy || !term.trim()}>Open handle detail</button></form>{error ? <p className="form-error" role="alert">{error}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<section className="admin-kpi-grid">{kpis.map(([label, value]) => <article className="glass card admin-kpi-card" key={label}><span className="eyebrow">{label}</span><strong>{value}</strong><small>Handle registry metric</small></article>)}</section><section className="glass card"><div className="section-header"><h2 className="display-md">Recent handle activity</h2><span className="source-chip">Auditable</span></div><div className="admin-activity-list">{recentActivity.length ? recentActivity.map((item) => <article className="admin-activity-row" key={`${item.activityType}-${item.id || item.requestId || item.purchaseId || item.transferId || item.auditId}`}><span className="source-chip">{item.activityType}</span><strong>@{item.normalizedHandle || item.handleId || item.targetId || 'handle'}</strong><p className="body-sm">{handleStatus(item)} · {relativeTime(item.createdAt || item.updatedAt)}</p></article>) : <p className="body-sm">No recent handle activity available.</p>}</div></section><section className="glass card"><div className="section-header"><h2 className="display-md">Canonical Handle Registry</h2><span className="source-chip">{filteredRows.length} shown</span></div><div className="chip-row">{handleFilters.map((item) => <button className={`chip ${filter === item ? 'active' : ''}`} type="button" onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><div className="admin-table handle-registry-table" role="table" aria-label="Handle registry">{handleRegistryColumns.map((column) => <span className="admin-table-heading" role="columnheader" key={column}>{column}</span>)}{filteredRows.slice(0, 80).map((item) => <button className="admin-table-cell-row" type="button" role="row" key={normalizeRegistryHandle(item)} onClick={() => { setTerm(normalizeRegistryHandle(item)); refresh(normalizeRegistryHandle(item)).catch((err) => setError(firebaseMessage(err))); }}><span>@{normalizeRegistryHandle(item)}</span><span>{item.originalHandle || item.displayHandle || '—'}</span><span>{item.ownerDisplayName || item.ownerUid || item.uid || '—'}</span><span>{item.ownerUid || item.uid || '—'}</span><span>{item.handleType || item.marketplaceClass || item.category || 'Standard'}</span><span>{handleStatus(item)}</span><span>{formatMoney(item.priceAmount || item.askingPriceAmount)}</span><span>{formatMoney(item.renewalPriceAmount)}</span><span>{item.reservedReason || item.protectedReason || item.notes || '—'}</span><span>{item.verificationState || item.verificationStatus || 'unverified'}</span><span>{timeLabel(item.createdAt)}</span><span>{timeLabel(item.reservedAt || item.lastTransferredAt)}</span><span>{timeLabel(item.expiresAt || item.renewalDate)}</span><span>{relativeTime(item.updatedAt || item.lastChangedAt)}</span><span>{item.adminLock || item.locked ? 'Locked' : '—'}</span><span>{displayValue(item.riskFlags || item.riskBand || item.riskScore)}</span></button>)}</div></section>{record ? <section className="glass card admin-drawer"><div className="section-header"><h2 className="display-lg">{handleDetail.exactHandle}</h2><span className="source-chip">{handleDetail.currentStatus}</span></div><div className="admin-detail-grid">{Object.entries(handleDetail).map(([label, value]) => <span key={label}><strong>{label.replace(/([A-Z])/g, ' $1')}</strong>{value}</span>)}</div><div className="admin-action-grid">{handleAdminActions.map((item) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => item === 'Reclaim' ? setReclaimOpen(true) : auditOnlyAction(item, record.normalizedHandle)} key={item}>{item}</button>)}</div></section> : null}<section className="marketplace-admin-grid"><article className="glass card"><h2 className="display-md">Purchase Requests</h2><div className="stack">{requests.items.slice(0, 12).map((item) => <div className="marketplace-review-row" key={item.id || item.requestId}><span><strong>@{item.normalizedHandle}</strong><small>{item.requestType} · {item.riskBand || 'risk pending'} · {handleStatus(item)}</small></span><div className="form-actions"><button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => reviewRequest(item, 'approve')}>Approve Handle Request</button><button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => reviewRequest(item, 'reject')}>Reject</button><button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => reviewRequest(item, 'request_id')}>Request ID</button><button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => reviewRequest(item, 'rescind_issued_handle')}>Rescind</button></div></div>)}</div></article><article className="glass card"><h2 className="display-md">Transfer Requests</h2><div className="stack">{transfers.items.slice(0, 8).map((item) => <div className="marketplace-review-row" key={item.id || item.transferId}><span><strong>@{item.normalizedHandle || item.handleId}</strong><small>{item.type || 'transfer'} · {handleStatus(item)}</small></span><button className="btn btn-secondary btn-sm" type="button" onClick={() => auditOnlyAction('Transfer handle', item.normalizedHandle || item.handleId)}>Review transfer</button></div>)}</div></article><article className="glass card"><h2 className="display-md">Protected Handles</h2><div className="stack">{protectedHandles.items.slice(0, 8).map((item) => <button className="profile-option-row" type="button" key={item.id || item.normalizedHandle} onClick={() => { setTerm(normalizeRegistryHandle(item)); refresh(normalizeRegistryHandle(item)).catch((err) => setError(firebaseMessage(err))); }}><span><strong>@{normalizeRegistryHandle(item)}</strong><small>{item.category} · {item.notes || item.protectedReason || 'protected'}</small></span><span className="source-chip">{item.status}</span></button>)}</div></article><article className="glass card"><h2 className="display-md">Reserved Handles</h2><div className="stack">{reservedHandles.items.slice(0, 8).map((item) => <button className="profile-option-row" type="button" key={item.id || item.normalizedHandle} onClick={() => { setTerm(normalizeRegistryHandle(item)); refresh(normalizeRegistryHandle(item)).catch((err) => setError(firebaseMessage(err))); }}><span><strong>@{normalizeRegistryHandle(item)}</strong><small>{item.category} · {item.notes || item.reservedReason || 'reserved'}</small></span><span className="source-chip">{item.status}</span></button>)}</div></article></section>{record ? <section className="glass card"><h2 className="display-md">Pricing</h2><form className="form-stack" onSubmit={manage}><label>Action<select value={action} onChange={(event) => setAction(event.target.value)}>{['price', 'protect', 'reserve', 'marketplace', 'release', 'retire', 'verify_owner', 'lock', 'unlock', 'suspend'].map((item) => <option key={item} value={item}>{item.replaceAll('_', ' ')}</option>)}</select></label><label>Handle type<select value={category} onChange={(event) => setCategory(event.target.value)}>{handleTypes.map((item) => <option key={item} value={item.toLowerCase().replaceAll(' ', '_')}>{item}</option>)}</select></label><label>Purchase price, minor units<input type="number" value={price} onChange={(event) => setPrice(event.target.value)} placeholder="500 = £5" /></label><label>Renewal price, minor units<input type="number" value={renewalPrice} onChange={(event) => setRenewalPrice(event.target.value)} placeholder="500 = £5" /></label><label>Currency<input value={currency} onChange={(event) => setCurrency(event.target.value.toUpperCase())} maxLength="3" /></label>{action === 'verify_owner' ? <label>Verified owner UID<input value={claimantUid} onChange={(event) => setClaimantUid(event.target.value)} /></label> : null}<label>Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label><button className="btn btn-primary" disabled={busy}>Apply backend registry action</button></form></section> : null}{record ? <section className="marketplace-admin-grid"><article className="glass card"><h2 className="display-md">User requests</h2><div className="stack">{record.requests?.length ? record.requests.map((item) => <article className="marketplace-review-row" key={item.id || item.requestId}><span><strong>{item.requestType}</strong><small>{handleStatus(item)} · Risk {item.riskScore} · {item.riskBand}</small></span><div className="form-actions"><button className="btn btn-secondary btn-sm" type="button" onClick={() => reviewRequest(item, 'approve')}>Approve</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => reviewRequest(item, 'reject')}>Reject</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => reviewRequest(item, 'protect_handle')}>Protect</button></div></article>) : <p className="body-sm">No user requests recorded.</p>}</div></article><article className="glass card"><h2 className="display-md">Payment history</h2>{record.purchases?.length ? <div className="stack">{record.purchases.map((item) => <article className="marketplace-review-row" key={item.id || item.purchaseId}><span><strong>{formatMoney(item.amountMinor, item.currency)}</strong><small>{item.paymentProviderMode || item.provider || 'unknown provider'} · {item.paymentStatus || item.status} · token {item.temporaryPaymentToken ? 'redacted' : 'none'}</small></span>{item.paymentProviderMode === 'placeholder' && item.paymentStatus !== 'refunded' ? <button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => refundPurchase(item.purchaseId || item.id)}>Refund placeholder purchase</button> : null}</article>)}</div> : <p className="body-sm">No purchases recorded.</p>}</article><article className="glass card"><h2 className="display-md">Transfer history</h2><div className="stack">{transfers.items.filter((item) => (item.normalizedHandle || item.handleId) === record.normalizedHandle).slice(0, 8).map((item) => <p className="body-sm" key={item.id || item.transferId}>{item.type} · {timeLabel(item.createdAt)} · previous {item.previousOwnerUid || 'none'}</p>)}</div></article><article className="glass card"><h2 className="display-md">Audit history</h2><div className="stack">{audits.items.filter((item) => item.normalizedHandle === record.normalizedHandle || item.targetId === record.normalizedHandle).slice(0, 8).map((item) => <p className="body-sm" key={item.id || item.auditId}>{item.action} · {relativeTime(item.createdAt)} · {item.actorUid || item.adminUid}</p>)}</div></article></section> : null}{reclaimOpen && record ? <section className="glass card"><h2 className="display-md">Reclaim @{record.normalizedHandle}</h2><form className="form-stack" onSubmit={reclaim}><label>Reason<select value={reason} onChange={(event) => setReason(event.target.value)}>{['impersonation', 'trademark', 'fraud', 'abuse', 'legal_compliance', 'public_interest', 'system_use', 'enforcement'].map((item) => <option key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label><label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}>{['mark_protected', 'permanently_reserve', 'assign_verified_claimant', 'assign_portal_account', 'return_to_marketplace', 'release_to_availability'].map((item) => <option key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label>{outcome.includes('assign_') ? <label>Receiving Portal UID<input value={claimantUid} onChange={(event) => setClaimantUid(event.target.value)} /></label> : null}<label>Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} required minLength="8" /></label><label>Type RECLAIM @{record.normalizedHandle}<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label><label className="check-row"><input type="checkbox" checked={highRiskConfirmed} onChange={(event) => setHighRiskConfirmed(event.target.checked)} /> I confirm this may be a high-risk reclaim.</label><div className="form-actions"><button className="btn btn-primary" disabled={busy}>Confirm reclaim</button><button className="btn btn-secondary" type="button" onClick={() => setReclaimOpen(false)}>Cancel</button></div></form></section> : null}<section className="glass card"><h2 className="display-md">Marketplace settings</h2><div className="admin-detail-grid"><span><strong>Handle Types</strong>{handleTypes.join(', ')}</span><span><strong>Statuses</strong>{handleStatuses.join(', ')}</span><span><strong>Admin Authority</strong>{handleAdminActions.join(', ')}</span><span><strong>Excluded</strong>Product listings, physical goods, seller shops, shopping carts, shipping, delivery, product orders, general seller accounts, product disputes, product categories and stock management.</span></div></section></div>;
 }
 
 function VortexControlCentre() {
@@ -320,7 +437,7 @@ const adminSections = [
   ['/events', 'Events'],
   ['/trending', 'Trending'],
   ['/verification', 'Verification'],
-  ['/handles', 'Handle Marketplace'],
+  ['/marketplace', 'Marketplace'],
   ['/creators', 'Creators'],
   ['/reports', 'Reports'],
   ['/notifications', 'Notifications'],
@@ -456,7 +573,7 @@ function CommandPalette({ open, onClose }) {
     ...reports.items.map((item) => ({ type: 'Posts', route: '/moderation', label: item.postId || item.targetId || item.id })),
     ...reports.items.map((item) => ({ type: 'Comments', route: '/moderation', label: item.commentId || item.replyId || item.id })),
     ...verification.items.map((item) => ({ type: 'Verification requests', route: '/verification', label: item.uid || item.organisationName || item.id })),
-    ...marketplace.items.map((item) => ({ type: 'Marketplace', route: '/handles', label: item.normalizedHandle || item.id })),
+    ...marketplace.items.map((item) => ({ type: 'Marketplace', route: '/marketplace', label: item.normalizedHandle || item.id })),
     ...audit.items.map((item) => ({ type: 'Audit log', route: '/audit-log', label: item.action || item.correlationId || item.id })),
     { type: 'Creators', route: '/creators', label: 'Creator directory' },
   ];
@@ -475,7 +592,7 @@ function AdminWorkspace({ current, user, claims }) {
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
   }, []);
-  const route = current === '/admin/handles' ? '/handles' : current === '/admin/vortex' ? '/trending' : current;
+  const route = current === '/admin/handles' || current === '/handles' ? '/marketplace' : current === '/admin/vortex' ? '/trending' : current;
   const pageMap = {
     '/': <AdminDashboard />,
     '/users': <UsersAdmin />,
@@ -484,7 +601,7 @@ function AdminWorkspace({ current, user, claims }) {
     '/trending': <TrendingAdmin />,
     '/vortex': <VortexControlCentre />,
     '/verification': <VerificationAdmin />,
-    '/handles': <AdminHandleRegistry />,
+    '/marketplace': <AdminHandleMarketplace />,
     '/creators': <CreatorsAdmin />,
     '/reports': <ReportsAdmin />,
     '/notifications': <NotificationsAdmin />,

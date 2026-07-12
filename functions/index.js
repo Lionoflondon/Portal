@@ -692,6 +692,18 @@ const ACTION_PERMISSION = {
   request_documents: 'request_documents',
   transfer: 'transfer_handle',
   transfer_handle: 'transfer_handle',
+  approve_handle_request: 'transfer_handle',
+  reject: 'transfer_handle',
+  reserve: 'transfer_handle',
+  protect: 'transfer_handle',
+  reclaim: 'recover_handle',
+  rescind: 'recover_handle',
+  reassign: 'transfer_handle',
+  lock: 'transfer_handle',
+  unlock: 'transfer_handle',
+  rename: 'transfer_handle',
+  release: 'recover_handle',
+  retire: 'recover_handle',
   recover: 'recover_handle',
   recover_handle: 'recover_handle',
   announcement: 'broadcast_notification',
@@ -1237,12 +1249,16 @@ export const reclaimPortalHandle = onCall(async (request) => {
 });
 
 export const managePortalHandleRegistry = onCall(async (request) => {
-  const adminUid = requireAdminPermission(request, ['verify_owner', 'reserve', 'protect'].includes(request.data?.action) ? 'transfer_handle' : 'recover_handle');
-  const normalizedHandle = normalizeHandle(request.data?.handle || '');
   const action = request.data?.action;
+  const adminUid = requireAdminPermission(request, ['verify_owner', 'reserve', 'protect', 'price', 'lock', 'unlock', 'suspend'].includes(action) ? 'transfer_handle' : 'recover_handle');
+  const normalizedHandle = normalizeHandle(request.data?.handle || '');
   const category = String(request.data?.category || 'marketplace');
-  if (!normalizedHandle || !['reserve', 'protect', 'release', 'retire', 'marketplace', 'verify_owner'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a handle and valid registry action.');
+  if (!normalizedHandle || !['reserve', 'protect', 'release', 'retire', 'marketplace', 'verify_owner', 'price', 'lock', 'unlock', 'suspend'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a handle and valid registry action.');
   if (requiresElevatedReclaim(category) && request.auth.token.portalHandleSuperAdmin !== true) throw new HttpsError('permission-denied', 'Elevated Portal administration is required for this category.');
+  const currency = String(request.data?.currency || 'GBP').toUpperCase().slice(0, 3);
+  const priceAmount = request.data?.priceAmount === null || request.data?.priceAmount === undefined ? null : validMoney(Number(request.data.priceAmount));
+  const renewalPriceAmount = request.data?.renewalPriceAmount === null || request.data?.renewalPriceAmount === undefined ? null : validMoney(Number(request.data.renewalPriceAmount));
+  if (action === 'price' && priceAmount === null && renewalPriceAmount === null) throw new HttpsError('invalid-argument', 'Set a purchase price or renewal price.');
   const handleRef = db.collection('handles').doc(normalizedHandle); const reservedRef = db.collection('reservedHandles').doc(normalizedHandle); const protectedRef = db.collection('protectedHandles').doc(normalizedHandle); const policyRef = db.collection('handlePolicies').doc(normalizedHandle);
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(handleRef); const ownerUid = snapshot.data()?.ownerUid || snapshot.data()?.uid || null;
@@ -1250,11 +1266,27 @@ export const managePortalHandleRegistry = onCall(async (request) => {
     if (action === 'release') transaction.set(policyRef, { normalizedHandle, status: 'available', marketplaceEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     if (action === 'retire') transaction.set(policyRef, { normalizedHandle, status: 'retired', marketplaceEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     if (action === 'marketplace') transaction.set(policyRef, { normalizedHandle, status: 'marketplace', category: 'marketplace', marketplaceEligible: true, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    if (action === 'price') {
+      transaction.set(policyRef, { normalizedHandle, category, status: 'marketplace', marketplaceEligible: true, currency, ...(priceAmount === null ? {} : { priceAmount }), ...(renewalPriceAmount === null ? {} : { renewalPriceAmount }), notes: String(request.data?.notes || ''), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(handleRef, { normalizedHandle, marketplaceClass: category, handleType: category, saleEligible: true, currency, ...(priceAmount === null ? {} : { priceAmount }), ...(renewalPriceAmount === null ? {} : { renewalPriceAmount }), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    if (action === 'lock') {
+      transaction.set(handleRef, { normalizedHandle, adminLock: true, status: 'locked', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(policyRef, { normalizedHandle, adminLock: true, status: 'locked', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    if (action === 'unlock') {
+      transaction.set(handleRef, { normalizedHandle, adminLock: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(policyRef, { normalizedHandle, adminLock: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
+    if (action === 'suspend') {
+      transaction.set(handleRef, { normalizedHandle, status: 'suspended', saleEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(policyRef, { normalizedHandle, status: 'suspended', marketplaceEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
     if (action === 'verify_owner') {
       const verifiedUid = request.data?.verifiedUid; if (!verifiedUid) throw new HttpsError('invalid-argument', 'Choose the verified owner.');
       transaction.set(handleRef, { normalizedHandle, ownerUid: verifiedUid, uid: verifiedUid, previousOwnerUid: ownerUid, status: 'verified_owner', marketplaceClass: 'user_owned', saleEligible: false, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     }
-    transaction.set(db.collection('auditLogs').doc(), { system: 'portal_handle_registry', action: `registry_${action}`, actorUid: adminUid, normalizedHandle, category, immutable: true, createdAt: FieldValue.serverTimestamp() });
+    transaction.set(db.collection('auditLogs').doc(), { system: 'portal_handle_registry', action: `registry_${action}`, actorUid: adminUid, normalizedHandle, category, priceAmount, renewalPriceAmount, currency, notes: String(request.data?.notes || ''), immutable: true, createdAt: FieldValue.serverTimestamp() });
   });
   return { normalizedHandle, action };
 });
