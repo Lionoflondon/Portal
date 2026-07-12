@@ -339,6 +339,8 @@ describe('Portal app shell', () => {
     expect(vortexBlock).toContain('People');
     expect(vortexBlock).toContain('Handles');
     expect(vortexBlock).toContain('Trending searches');
+    expect(vortexBlock).toContain('function updateTerm(value) { setTerm(value); }');
+    expect(vortexBlock).not.toContain('window.location.hash = publicProfileRoute(value)');
     expect(settingsBlock).toContain('Appearance');
     expect(settingsBlock).toContain('Accessibility');
     expect(settingsBlock).toContain('Blocked users');
