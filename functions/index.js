@@ -506,7 +506,7 @@ async function upsertCandidate(candidate, provider) {
   const candidateId = `${candidate.provider}_${Buffer.from(candidate.providerItemId).toString('base64url').slice(0, 80)}`;
   const candidateRef = db.collection('eventCandidates').doc(candidateId);
   const existingCandidate = await candidateRef.get();
-  if (existingCandidate.exists && existingCandidate.data().eventId) return { action: 'already_attached', eventId: existingCandidate.data().eventId };
+  if (existingCandidate.exists && existingCandidate.data().eventId) return { action: 'already_created', eventId: existingCandidate.data().eventId };
   const windowStart = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
   const nearbyEvents = await db.collection('events').where('archived', '==', false).where('updatedAt', '>=', windowStart).limit(50).get();
   const decision = dedupeDecision(candidate, nearbyEvents.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
@@ -515,7 +515,8 @@ async function upsertCandidate(candidate, provider) {
     await db.collection('eventMergeReviews').doc(candidateId).set({ candidateId, possibleEventId: decision.eventId, status: 'pending_custodian_review', reason: 'possible_duplicate', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     return decision;
   }
-  const eventRef = decision.action === 'attach' ? db.collection('events').doc(decision.eventId) : db.collection('events').doc();
+  const storyPeerEventId = decision.action === 'cluster_story' ? decision.eventId : null;
+  const eventRef = db.collection('events').doc();
   await db.runTransaction(async (transaction) => {
     const eventSnapshot = await transaction.get(eventRef);
     const now = FieldValue.serverTimestamp();
@@ -539,7 +540,8 @@ async function upsertCandidate(candidate, provider) {
         officialSourceCount: 0,
         confidenceLabel: 'Emerging',
         duplicateEventIds: [],
-        relatedEventIds: [],
+        relatedEventIds: storyPeerEventId ? [storyPeerEventId] : [],
+        storyGraphEventIds: storyPeerEventId ? [storyPeerEventId, eventRef.id] : [eventRef.id],
         visibility: 'public',
         archived: false,
         moderationState: 'approved',
@@ -550,10 +552,23 @@ async function upsertCandidate(candidate, provider) {
         createdAt: now,
         updatedAt: now,
       });
-    } else {
-      transaction.set(eventRef, { updatedAt: now }, { merge: true });
     }
-    transaction.set(candidateRef, { eventId: eventRef.id, decision: eventSnapshot.exists ? 'attach' : 'create', updatedAt: now }, { merge: true });
+    transaction.set(candidateRef, { eventId: eventRef.id, decision: storyPeerEventId ? 'cluster_story' : 'create', storyGraphEventIds: storyPeerEventId ? [storyPeerEventId, eventRef.id] : [eventRef.id], updatedAt: now }, { merge: true });
+    if (storyPeerEventId) {
+      const peerRef = db.collection('events').doc(storyPeerEventId);
+      transaction.set(peerRef, { relatedEventIds: FieldValue.arrayUnion(eventRef.id), storyGraphEventIds: FieldValue.arrayUnion(eventRef.id), updatedAt: now }, { merge: true });
+      transaction.set(eventRef, { relatedEventIds: FieldValue.arrayUnion(storyPeerEventId), storyGraphEventIds: FieldValue.arrayUnion(storyPeerEventId), updatedAt: now }, { merge: true });
+      transaction.set(db.collection('eventRelationships').doc(`${storyPeerEventId}_${eventRef.id}`), {
+        fromEventId: storyPeerEventId,
+        toEventId: eventRef.id,
+        relationshipType: 'vortex_story_cluster',
+        status: 'active',
+        preservesIndependentEvents: true,
+        createdByType: 'external_ingestion',
+        createdAt: now,
+        updatedAt: now,
+      }, { merge: true });
+    }
     transaction.set(db.collection('eventSources').doc(candidateId), {
       eventId: eventRef.id,
       candidateId,
@@ -594,10 +609,11 @@ async function upsertCandidate(candidate, provider) {
       createdAt: now,
       updatedAt: now,
     }, { merge: true });
-    transaction.set(db.collection('eventStatusHistory').doc(), { eventId: eventRef.id, status: eventSnapshot.exists ? eventSnapshot.data().status : initialStatusForCandidate(candidate), reason: eventSnapshot.exists ? 'source_attached' : 'external_candidate_created', actorType: 'external_ingestion', createdAt: now });
+    transaction.set(db.collection('eventStatusHistory').doc(), { eventId: eventRef.id, status: eventSnapshot.exists ? eventSnapshot.data().status : initialStatusForCandidate(candidate), reason: storyPeerEventId ? 'vortex_story_clustered' : 'external_candidate_created', actorType: 'external_ingestion', createdAt: now });
   });
-  await recalculateEvent(eventRef.id, { type: decision.action === 'attach' ? 'source_refreshed' : 'major_update', summary: candidate.title, dedupeKey: candidateId });
-  return { action: decision.action === 'attach' ? 'attach' : 'create', eventId: eventRef.id };
+  await recalculateEvent(eventRef.id, { type: storyPeerEventId ? 'related_event_linked' : 'major_update', summary: candidate.title, dedupeKey: candidateId });
+  if (storyPeerEventId) await recalculateEvent(storyPeerEventId, { type: 'related_event_linked', summary: candidate.title, dedupeKey: candidateId });
+  return { action: storyPeerEventId ? 'cluster_story' : 'create', eventId: eventRef.id, storyGraphEventIds: storyPeerEventId ? [storyPeerEventId, eventRef.id] : [eventRef.id] };
 }
 
 async function ensureProductionProviders() {
@@ -635,7 +651,7 @@ async function runGlobalEventsIngestion({ providerLimit = 10 } = {}) {
       for (const candidate of candidates) {
         const outcome = await upsertCandidate(candidate, provider);
         if (outcome.action === 'create') createdCount += 1;
-        else if (outcome.action === 'attach' || outcome.action === 'already_attached') attachedCount += 1;
+        else if (outcome.action === 'cluster_story' || outcome.action === 'already_created') attachedCount += 1;
         else if (outcome.action === 'review') reviewCount += 1;
       }
       await providerDoc.ref.set({ lastSuccessfulRunAt: FieldValue.serverTimestamp(), lastRunAt: FieldValue.serverTimestamp(), lastError: null, healthState: 'healthy', lastCandidateCount: candidates.length, lastCreatedCount: createdCount, lastAttachedCount: attachedCount, lastReviewCount: reviewCount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });

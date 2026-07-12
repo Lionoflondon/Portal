@@ -90,7 +90,7 @@ export function sameHappening(candidate, event = {}) {
 
 export function dedupeDecision(candidate, events = []) {
   const exact = events.find((event) => sameHappening(candidate, event));
-  if (exact) return { action: 'attach', eventId: exact.id };
+  if (exact) return { action: 'cluster_story', eventId: exact.id };
   const possible = events.find((event) => titleSimilarity(candidate.title, event.title) >= 0.35);
   if (possible) return { action: 'review', eventId: possible.id };
   return { action: 'create' };

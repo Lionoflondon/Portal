@@ -114,11 +114,34 @@ describe('Portal app shell', () => {
     expect(formBlock).toContain('Public');
     expect(formBlock).toContain('Followers');
     expect(formBlock).toContain('Private');
+    expect(formBlock).toContain('Vortex story hint');
+    expect(formBlock).toContain('This never merges Event ownership, media, comments or URLs.');
     expect(styles).toContain('.event-masonry{column-count:5');
     expect(styles).toContain('@media (min-width:1500px){.event-masonry{column-count:6}}');
     expect(styles).toContain('@media (max-width:640px){.event-masonry{column-count:2');
     expect(styles).toContain('break-inside:avoid');
   });
+
+  it('keeps Events independent and moves clustering into Vortex story graphs', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const engine = readFileSync(resolve('functions/global-events-engine.js'), 'utf8');
+    const eventDetailBlock = source.match(/function EventDetail\([\s\S]*?\n}\n\nfunction TimelineList/)?.[0] || '';
+    const vortexEntryBlock = source.match(/function storyEventIds\([\s\S]*?\n}\n\nfunction HandleMarketplace/)?.[0] || '';
+    expect(engine).toContain("action: 'cluster_story'");
+    expect(engine).not.toContain("action: 'attach'");
+    expect(eventDetailBlock).toContain('This Event remains independent.');
+    expect(eventDetailBlock).toContain('Original creator, timestamp, media, comments and URL stay attached to this Event.');
+    expect(eventDetailBlock).toContain('Clustered in Vortex, not merged.');
+    expect(vortexEntryBlock).toContain('function storyEventIds(entry = {})');
+    expect(vortexEntryBlock).toContain('Story graph');
+    expect(vortexEntryBlock).toContain('Pulse Strength');
+    expect(vortexEntryBlock).toContain('Open Event');
+    expect(vortexEntryBlock).toContain('Events are not merged.');
+    expect(styles).toContain('.vortex-pulse-bar');
+    expect(styles).not.toContain('.pulse-meter');
+  });
+
 
   it('keeps handle purchasing inside Marketplace with development payment copy', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');

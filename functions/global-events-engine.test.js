@@ -32,11 +32,11 @@ test('external candidate normalises into a canonical candidate format', () => {
   assert.ok(candidate.fingerprint.includes('rail disruption'));
 });
 
-test('repeated provider item and two sources for one happening attach to one Event', () => {
+test('same-happening candidates cluster into a Vortex story without merging Events', () => {
   const candidate = normaliseCandidate({ provider: 'rss-a', providerItemId: '1', title: 'Flood warning issued for York', locationText: 'York', category: 'Weather', publishedAt: '2026-07-11T08:00:00Z' });
   const existing = { id: 'event-1', title: 'Flood warning issued in York', locationSummary: 'York', category: 'Weather', startTime: '2026-07-11T08:10:00Z' };
   assert.equal(sameHappening(candidate, existing), true);
-  assert.deepEqual(dedupeDecision(candidate, [existing]), { action: 'attach', eventId: 'event-1' });
+  assert.deepEqual(dedupeDecision(candidate, [existing]), { action: 'cluster_story', eventId: 'event-1' });
 });
 
 test('unrelated happenings remain separate while loose matches enter Custodian review', () => {
