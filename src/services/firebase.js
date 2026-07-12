@@ -537,6 +537,7 @@ export function createPortalQuoteEcho(postId, quoteText) { return callPortalIden
 export function createPortalPost(payload) { return callPortalIdentity('createPortalPost', typeof payload === 'string' ? { body: payload } : payload); }
 export function togglePortalPostLike(postId) { return callPortalIdentity('togglePostLike', { postId }); }
 export function togglePortalPostBookmark(postId) { return callPortalIdentity('togglePostBookmark', { postId }); }
+export function registerPortalPostView(postId, metadata = {}) { return callPortalIdentity('registerPostView', { postId, ...metadata }); }
 export function createPortalPostReply(postId, body) { return callPortalIdentity('createPostReply', { postId, body }); }
 export function deletePortalQuoteEcho(quoteEchoId) { return callPortalIdentity('deletePortalQuoteEcho', { quoteEchoId }); }
 export function submitPortalEventContribution(eventId, type, body, extra = {}) { return callPortalIdentity('submitEventContribution', { eventId, type, body, ...extra }); }

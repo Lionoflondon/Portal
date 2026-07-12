@@ -1,0 +1,15 @@
+.post-view-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.post-view-count svg {
+  width: 17px;
+  height: 17px;
+  opacity: .86;
+}

@@ -103,6 +103,19 @@ describe('Portal Firebase rules', () => {
     await assertFails(setDoc(doc(jason.firestore(), 'postReplies/reply-2'), { postId: 'post-1', authorUid: 'jason-social', body: 'Client write', visibility: 'public' }));
   });
 
+  it('keeps post view counts and viewer records server-authoritative', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'posts/post-view-1'), { authorUid: 'author-view', visibility: 'public', moderationState: 'approved', viewCount: 4 });
+      await setDoc(doc(context.firestore(), 'postViews/post-view-1/viewers/auth_jason-view'), { postId: 'post-view-1', viewerId: 'auth_jason-view', viewerType: 'authenticated', firstViewedAt: new Date(), lastViewedAt: new Date() });
+    });
+    const jason = testEnv.authenticatedContext('jason-view');
+    const admin = testEnv.authenticatedContext('portal-operator', { admin: true });
+    await assertFails(updateDoc(doc(jason.firestore(), 'posts/post-view-1'), { viewCount: 999 }));
+    await assertFails(setDoc(doc(jason.firestore(), 'postViews/post-view-1/viewers/auth_jason-view'), { postId: 'post-view-1', viewerId: 'auth_jason-view' }, { merge: true }));
+    await assertFails(getDoc(doc(jason.firestore(), 'postViews/post-view-1/viewers/auth_jason-view')));
+    await assertSucceeds(getDoc(doc(admin.firestore(), 'postViews/post-view-1/viewers/auth_jason-view')));
+  });
+
   it('keeps Global Event Engine records server-authoritative', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'eventTimeline/entry-1'), { eventId: 'event-1', entryType: 'event_detected', eventTimestamp: new Date(), ingestionTimestamp: new Date(), moderationState: 'approved' });

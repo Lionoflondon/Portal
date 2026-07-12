@@ -14,6 +14,7 @@ import { canAutoIssueFreeHandle, evaluateHandleRisk } from './handle-risk-engine
 import { echoKey, echoNotificationId, isEchoablePost, nextEchoCount } from './echo-engine.js';
 import { PlaceholderPaymentProvider, activePaymentProvider, calculateCommission, marketplacePaymentProvider, marketplaceStateForHandle, mayBeginCheckout, mayListHandle, mayTransfer, pricingForHandle, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
 import { confidenceFromSignals, dedupeDecision, initialStatusForCandidate, isMeaningfulEventChange, normaliseCandidate, shouldPublishCandidate, timelineEntryId } from './global-events-engine.js';
+import { normaliseViewerKey, safeDeviceType, shouldCountView } from './post-view-engine.js';
 
 initializeApp();
 setGlobalOptions({ region: 'europe-west2' });
@@ -284,6 +285,45 @@ export const togglePostBookmark = onCall(async (request) => {
     const active = bookmarkSnapshot.exists && bookmarkSnapshot.data().status === 'active';
     transaction.set(bookmarkRef, { bookmarkId: bookmarkRef.id, postId, uid, status: active ? 'removed' : 'active', updatedAt: FieldValue.serverTimestamp(), createdAt: bookmarkSnapshot.data()?.createdAt || FieldValue.serverTimestamp() }, { merge: true });
     return { bookmarked: !active };
+  });
+});
+
+export const registerPostView = onCall(async (request) => {
+  const postId = String(request.data?.postId || '').trim();
+  if (!postId) throw new HttpsError('invalid-argument', 'Choose a Post to view.');
+  const viewer = normaliseViewerKey({ uid: request.auth?.uid || '', anonymousId: request.data?.anonymousId || '' });
+  if (!viewer) throw new HttpsError('invalid-argument', 'A stable viewer identifier is required.');
+  const postRef = db.collection('posts').doc(postId);
+  const viewRef = db.collection('postViews').doc(postId).collection('viewers').doc(viewer.viewerId);
+  const deviceType = safeDeviceType(String(request.data?.deviceType || 'unknown'));
+  return db.runTransaction(async (transaction) => {
+    const [postSnapshot, viewSnapshot] = await Promise.all([transaction.get(postRef), transaction.get(viewRef)]);
+    if (!postSnapshot.exists || !isEchoablePost(postSnapshot.data())) throw new HttpsError('failed-precondition', 'This Post is not available.');
+    const existing = viewSnapshot.exists ? viewSnapshot.data() : null;
+    const counted = shouldCountView(existing);
+    const now = FieldValue.serverTimestamp();
+    transaction.set(viewRef, {
+      postId,
+      viewerId: viewer.viewerId,
+      viewerType: viewer.viewerType,
+      deviceType,
+      firstViewedAt: existing?.firstViewedAt || now,
+      lastViewedAt: now,
+      ...(counted ? { lastCountedAt: now } : {}),
+      updatedAt: now,
+      viewAttempts: FieldValue.increment(1),
+    }, { merge: true });
+    if (counted) {
+      const post = postSnapshot.data();
+      transaction.update(postRef, {
+        viewCount: Math.max(0, Number(post.viewCount || 0)) + 1,
+        uniqueViewerCount: viewSnapshot.exists ? Number(post.uniqueViewerCount || 0) : Number(post.uniqueViewerCount || 0) + 1,
+        authenticatedViewCount: viewer.viewerType === 'authenticated' ? Number(post.authenticatedViewCount || 0) + 1 : Number(post.authenticatedViewCount || 0),
+        anonymousViewCount: viewer.viewerType === 'anonymous' ? Number(post.anonymousViewCount || 0) + 1 : Number(post.anonymousViewCount || 0),
+        updatedAt: now,
+      });
+    }
+    return { counted, viewCount: counted ? Number(postSnapshot.data().viewCount || 0) + 1 : Number(postSnapshot.data().viewCount || 0) };
   });
 });
 

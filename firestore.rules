@@ -165,6 +165,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /postViews/{postId}/viewers/{viewerId} {
+      allow read: if isPrivilegedPortalOperator();
+      allow write: if false;
+    }
+
     match /postEchoes/{echoId} {
       allow read: if signedIn() && resource.data.echoingUid == request.auth.uid;
       allow write: if false;
