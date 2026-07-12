@@ -112,6 +112,18 @@ function cleanHandle(value = '') { return String(value || '').replace(/^@/, '').
 function publicProfileRoute(handle = '') { const normalized = cleanHandle(handle); return normalized ? `#/@${normalized}` : '#/profile'; }
 function publicProfileUrl(handle = '') { const normalized = cleanHandle(handle); return normalized ? `${window.location.origin}/@${normalized}` : `${window.location.origin}/#/profile`; }
 function firebaseMessage(error) { return error?.message?.replace('Firebase: ', '') || 'Something went wrong. Please try again.'; }
+function publicAuthError(error) {
+  const code = String(error?.code || '').toLowerCase();
+  if (code) console.debug('Portal authentication failed', code);
+  if (code.includes('auth/invalid-email')) return { title: 'Invalid email address', body: 'Please enter a valid email address.' };
+  if (code.includes('auth/wrong-password')) return { title: 'Incorrect password', body: 'The password you entered is incorrect. Try again or reset your password.' };
+  if (code.includes('auth/user-not-found')) return { title: 'No account found', body: "We couldn't find a Portal account with that email. Create a new account to get started." };
+  if (code.includes('auth/network-request-failed') || code.includes('auth/network')) return { title: "You're offline", body: 'Check your internet connection and try again.' };
+  if (code.includes('auth/too-many-requests')) return { title: 'Too many attempts', body: 'For your security, sign-in has been temporarily limited. Please wait a few minutes before trying again.' };
+  if (code.includes('auth/invalid-credential') || code.includes('auth/invalid-login-credentials')) return { title: "Couldn't sign you in", body: "The email or password you entered doesn't match a Portal account. Check your details and try again, or create a new account if you're new to Portal." };
+  if (code.includes('auth/email-already-in-use')) return { title: 'Account already exists', body: 'A Portal account already uses that email. Sign in instead, or reset your password if you need help getting back in.' };
+  return { title: 'Something went wrong', body: "We couldn't sign you in right now. Please try again shortly." };
+}
 function formatMoney(amountMinor, currency = 'GBP') {
   if (!Number.isFinite(amountMinor)) return 'Custom price';
   return new Intl.NumberFormat('en-GB', { style: 'currency', currency }).format(amountMinor / 100);
@@ -588,9 +600,32 @@ function Settings({ user, profile }) {
 }
 
 function AuthScreen() {
-  const [mode, setMode] = useState('signin'); const [values, setValues] = useState({ name: '', email: '', password: '' }); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
-  async function submit(event) { event.preventDefault(); setBusy(true); setError(''); setNotice(''); try { if (mode === 'signup') { if (values.name.trim().length < 2) throw new Error('Please add your name.'); await registerPortalUser({ displayName: values.name.trim(), email: values.email.trim(), password: values.password }); } else if (mode === 'reset') { await sendPortalPasswordReset(values.email.trim()); setNotice('A password reset email has been sent.'); } else { await signInPortalUser(values.email.trim(), values.password); } } catch (reason) { setError(firebaseMessage(reason)); } finally { setBusy(false); } }
-  return <main className="auth-shell"><div className="auth-panel"><Brand /><div><h1 className="display-xl">{mode === 'signup' ? 'Create your Portal' : mode === 'reset' ? 'Reset your password' : 'Welcome back'}</h1><p className="body-md">{mode === 'signup' ? 'Start organising the world’s happenings.' : 'Enter Portal’s living memory.'}</p></div>{!hasFirebaseConfig ? <ErrorState message="Firebase environment configuration is missing." /> : <form className="form-stack" onSubmit={submit}>{mode === 'signup' ? <label>Name<input value={values.name} onChange={(event) => setValues({ ...values, name: event.target.value })} required /></label> : null}<label>Email<input type="email" value={values.email} onChange={(event) => setValues({ ...values, email: event.target.value })} required autoComplete="email" /></label>{mode !== 'reset' ? <label>Password<input type="password" value={values.password} onChange={(event) => setValues({ ...values, password: event.target.value })} required minLength="8" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<button className="btn btn-primary" disabled={busy}>{busy ? 'Please wait...' : mode === 'signup' ? 'Create account' : mode === 'reset' ? 'Send reset email' : 'Sign in'}</button></form>}<div className="auth-links">{mode !== 'signin' ? <button type="button" onClick={() => setMode('signin')}>Sign in</button> : <button type="button" onClick={() => setMode('signup')}>Create an account</button>}{mode === 'signin' ? <button type="button" onClick={() => setMode('reset')}>Forgot password?</button> : null}</div></div></main>;
+  const [mode, setMode] = useState('signin'); const [values, setValues] = useState({ name: '', email: '', password: '' }); const [busy, setBusy] = useState(false); const [error, setError] = useState(null); const [notice, setNotice] = useState('');
+  function update(field, value) { setValues({ ...values, [field]: value }); if (field === 'email' || field === 'password') setError(null); }
+  function switchMode(nextMode) { setMode(nextMode); setError(null); setNotice(''); }
+  async function submit(event) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true); setError(null); setNotice('');
+    try {
+      if (mode === 'signup') {
+        if (values.name.trim().length < 2) throw new Error('missing-name');
+        await registerPortalUser({ displayName: values.name.trim(), email: values.email.trim(), password: values.password });
+      } else if (mode === 'reset') {
+        await sendPortalPasswordReset(values.email.trim());
+        setNotice('A password reset email has been sent.');
+      } else {
+        await signInPortalUser(values.email.trim(), values.password);
+      }
+    } catch (reason) {
+      setError(reason?.message === 'missing-name' ? { title: 'Add your name', body: 'Please add your name before creating your Portal account.' } : publicAuthError(reason));
+    } finally { setBusy(false); }
+  }
+  return <main className="auth-shell"><div className="auth-panel"><Brand /><div><h1 className="display-xl">{mode === 'signup' ? 'Create your Portal' : mode === 'reset' ? 'Reset your password' : 'Welcome back'}</h1><p className="body-md">{mode === 'signup' ? 'Start organising the world’s happenings.' : 'Enter Portal’s living memory.'}</p></div>{!hasFirebaseConfig ? <ErrorState message="Firebase environment configuration is missing." /> : <form className="form-stack" onSubmit={submit}>{mode === 'signup' ? <label>Name<input value={values.name} onChange={(event) => update('name', event.target.value)} required /></label> : null}<label>Email<input type="email" value={values.email} onChange={(event) => update('email', event.target.value)} required autoComplete="email" /></label>{mode !== 'reset' ? <label>Password<input type="password" value={values.password} onChange={(event) => update('password', event.target.value)} required minLength="8" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label> : null}{error ? <AuthErrorCard error={error} /> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<button className="btn btn-primary" disabled={busy} aria-busy={busy}>{busy ? 'Please wait...' : mode === 'signup' ? 'Create account' : mode === 'reset' ? 'Send reset email' : 'Sign in'}</button></form>}<div className="auth-links">{mode !== 'signin' ? <button type="button" onClick={() => switchMode('signin')}>Sign in</button> : <button type="button" onClick={() => switchMode('signup')}>Create an account</button>}{mode === 'signin' ? <button type="button" onClick={() => switchMode('reset')}>Forgot password?</button> : null}</div></div></main>;
+}
+
+function AuthErrorCard({ error }) {
+  return <section className="auth-error-card" role="alert" aria-live="assertive"><strong>{error.title}</strong><p>{error.body}</p></section>;
 }
 
 function CreateModal({ open, onClose, user, profile, events }) {

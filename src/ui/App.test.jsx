@@ -20,6 +20,38 @@ describe('Portal app shell', () => {
     expect(PROFILE_HANDLE_PLACEHOLDER).toBe('Choose your unique handle');
   });
 
+  it('maps Firebase auth failures to public Portal guidance', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    expect(source).toContain("title: \"Couldn't sign you in\"");
+    expect(source).toContain("The email or password you entered doesn't match a Portal account.");
+    expect(source).toContain("title: 'Invalid email address'");
+    expect(source).toContain("body: 'Please enter a valid email address.'");
+    expect(source).toContain("title: 'Incorrect password'");
+    expect(source).toContain('The password you entered is incorrect. Try again or reset your password.');
+    expect(source).toContain("title: 'No account found'");
+    expect(source).toContain("We couldn't find a Portal account with that email.");
+    expect(source).toContain("title: \"You're offline\"");
+    expect(source).toContain('Check your internet connection and try again.');
+    expect(source).toContain("title: 'Too many attempts'");
+    expect(source).toContain('sign-in has been temporarily limited');
+    expect(source).toContain("title: 'Something went wrong'");
+    expect(source).toContain("We couldn't sign you in right now. Please try again shortly.");
+  });
+
+  it('keeps raw Firebase auth errors out of the rendered auth screen', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const authBlock = source.match(/function AuthScreen\([\s\S]*?\n}\n\nfunction AuthErrorCard/)?.[0] || '';
+    const errorCardBlock = source.match(/function AuthErrorCard\([\s\S]*?\n}\n\nfunction CreateModal/)?.[0] || '';
+    expect(authBlock).toContain('publicAuthError(reason)');
+    expect(authBlock).toContain('setError(null)');
+    expect(errorCardBlock).toContain('role="alert"');
+    expect(errorCardBlock).toContain('aria-live="assertive"');
+    expect(authBlock).not.toContain('firebaseMessage(reason)');
+    for (const code of ['auth/invalid-credential', 'auth/user-not-found', 'auth/wrong-password', 'auth/invalid-email', 'auth/email-already-in-use', 'auth/network-request-failed']) {
+      expect(authBlock).not.toContain(code);
+    }
+  });
+
   it('keeps account-only destinations out of the visible sidebar', () => {
     expect(secondaryRoutes.map((route) => route.label)).toEqual(['Official Sources', 'Marketplace']);
   });
