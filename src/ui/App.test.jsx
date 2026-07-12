@@ -102,6 +102,9 @@ describe('Portal app shell', () => {
     const marketplaceBlock = source.match(/function HandleMarketplace\([\s\S]*?\n}\n\nfunction HandleIdentity/)?.[0] || '';
     expect(marketplaceBlock).toContain('Reserve, discover and trade eligible Portal identities.');
     expect(marketplaceBlock).toContain('Reserve your free handle');
+    expect(marketplaceBlock).toContain('Change to this handle');
+    expect(marketplaceBlock).toContain('changePortalHandle(next)');
+    expect(marketplaceBlock).toContain('Changing to this handle replaces your current free handle.');
     expect(marketplaceBlock).toContain('Handle lifecycle');
     expect(marketplaceBlock).toContain('Suggestions');
     expect(marketplaceBlock).toContain('Your Requests');
@@ -180,7 +183,8 @@ describe('Portal app shell', () => {
     expect(postCardBlock).toContain('document.visibilityState');
     expect(postCardBlock).toContain('post-view-count');
     expect(postCardBlock).toContain('<ActionIcon name="view" />');
-    expect(postCardBlock).toContain('formatViewCount(post.viewCount)');
+    expect(postCardBlock).toContain('viewCountLabel(post.viewCount)');
+    expect(source).toContain("value === 1 ? 'View' : 'Views'");
     expect(icons).toContain("name === 'like'");
     expect(icons).toContain("name === 'reply'");
     expect(icons).toContain("name === 'echo'");
