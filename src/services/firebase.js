@@ -523,7 +523,7 @@ export function checkPortalHandle(handle) { return callPortalIdentity('checkHand
 export function reservePortalHandle(handle, profile) { return callPortalIdentity('reserveHandle', { handle, ...(profile ? { profile } : {}) }); }
 export function changePortalHandle(handle) { return callPortalIdentity('changeHandle', { handle }); }
 export function resolvePortalHandle(handle) { return callPortalIdentity('resolveHandle', { handle }); }
-export function searchPortalProfiles(term) { return callPortalIdentity('searchPortalProfiles', { term }); }
+export function searchPortalProfiles(term) { return callPortalIdentity('searchPortalProfiles', { term }).then((data) => data.profiles || data || []); }
 export function searchPortalHandleMarketplace(handle) { return callPortalIdentity('searchHandleMarketplace', { handle }); }
 export function startPortalHandlePurchase(handle) { return callPortalIdentity('startHandlePurchase', { handle }); }
 export function confirmPortalHandlePurchase(purchaseId) { return callPortalIdentity('confirmHandlePurchase', { purchaseId }); }
