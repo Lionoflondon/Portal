@@ -40,10 +40,18 @@ describe('Portal app shell', () => {
     expect(icons).toContain("className={name === 'vortex' ? 'vortex-icon' : undefined}");
     expect(source).toContain('<Icon name="create" />Create');
     expect(styles).toContain('--accent:#63D6F2');
+    expect(styles).toContain('--cta-teal:#57CFEA');
+    expect(styles).toContain('--cta-ink:#0B1220');
     expect(styles).toContain('--nav-inactive:#7E8798');
     expect(styles).toContain('.nav-item[aria-current=page]{color:var(--accent);background:rgba(99,214,242,.10)');
-    expect(styles).toContain('.btn-primary{background:var(--accent);color:#fff');
-    expect(styles).toContain('.create-btn{margin-top:6px;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 16px;border-radius:16px;background:var(--accent);color:#fff');
+    expect(styles).toContain('.btn-primary{background:rgba(87,207,234,.94);color:var(--cta-ink)');
+    expect(styles).toContain('.btn-primary svg{color:var(--cta-ink)}');
+    expect(styles).toContain('.btn-primary:hover{background:var(--cta-teal-hover);color:var(--cta-ink)');
+    expect(styles).toContain('.btn-primary:active{background:var(--cta-teal-pressed)');
+    expect(styles).toContain('.create-btn{margin-top:6px;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 16px;border-radius:16px;background:rgba(87,207,234,.94);color:var(--cta-ink)');
+    expect(styles).toContain('.create-btn svg{width:24px;height:24px;color:var(--cta-ink)}');
+    expect(styles).toContain('.create-btn:hover{transform:translateY(-1px);background:var(--cta-teal-hover);color:var(--cta-ink)');
+    expect(styles).toContain('.create-btn:active{transform:translateY(0);background:var(--cta-teal-pressed)');
   });
 
   it('keeps event discovery out of Home and routes it to Events', () => {
