@@ -143,6 +143,59 @@ describe('Portal app shell', () => {
 
 
 
+
+  it('supports owner-only Post deletion without exposing delete to other users', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const functions = readFileSync(resolve('functions/index.js'), 'utf8');
+    const rules = readFileSync(resolve('firestore.rules'), 'utf8');
+    const postCardBlock = source.match(/function PostCard\([\s\S]*?\n}\n\nfunction QuoteEchoComposer/)?.[0] || '';
+    const appBlock = source.match(/export function App\([\s\S]*?\n}\n$/)?.[0] || '';
+    expect(postCardBlock).toContain('const isOwner = Boolean(currentUser?.uid');
+    expect(postCardBlock).toContain('Post options');
+    expect(postCardBlock).toContain('Edit post');
+    expect(postCardBlock).toContain('Delete post');
+    expect(postCardBlock).toContain('Copy link');
+    expect(postCardBlock).toContain('Pin to profile');
+    expect(postCardBlock).toContain('Delete this post?');
+    expect(postCardBlock).toContain('This action cannot be undone.');
+    expect(postCardBlock).toContain('btn btn-danger');
+    expect(appBlock).toContain('setDeletedPostIds((current) => new Set([...current, post.id]))');
+    expect(appBlock).toContain("setToast('Post deleted.')");
+    expect(appBlock).toContain('visiblePosts = posts.filter((post) => !deletedPostIds.has(post.id))');
+    expect(service).toContain("deletePortalPost(postId) { return callPortalIdentity('deletePortalPost'");
+    expect(functions).toContain('export const deletePortalPost = onCall');
+    expect(functions).toContain("if (postAuthor(post) !== uid) throw new HttpsError('permission-denied'");
+    expect(functions).toContain('deletePostMediaObjects(postData || {})');
+    expect(functions).toContain("db.collection('postLikes').where('postId', '==', postId)");
+    expect(functions).toContain("db.collection('postReplies').where('postId', '==', postId)");
+    expect(rules).toContain('match /posts/{postId}');
+    expect(rules).toContain('allow write: if false;');
+  });
+
+  it('opens Profile in view mode and keeps editing behind a save-first modal', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const profileBlock = source.match(/function PersonalProfile\([\s\S]*?\n}\n\nfunction FeaturePage/)?.[0] || '';
+    const editBlock = source.match(/function ProfileEditModal\([\s\S]*?\n}\n\nfunction PersonalProfile/)?.[0] || '';
+    const appBlock = source.match(/export function App\([\s\S]*?\n}\n$/)?.[0] || '';
+    expect(appBlock).toContain("current === '/profile') page = profile ? <PersonalProfile");
+    expect(profileBlock).toContain('Edit Profile');
+    expect(profileBlock).toContain('Share Profile');
+    expect(profileBlock).toContain('Copy Profile Link');
+    expect(profileBlock).toContain('View as Public');
+    expect(profileBlock).toContain("['Posts', 'Replies', 'Media']");
+    expect(editBlock).toContain('profile-edit-sticky');
+    expect(editBlock).toContain("localStorage.setItem(draftKey");
+    expect(editBlock).toContain('Discard unsaved profile changes?');
+    expect(editBlock).toContain('checkPortalHandle(next)');
+    expect(editBlock).toContain('changePortalHandle(nextHandle)');
+    expect(editBlock).toContain('reservePortalHandle(nextHandle)');
+    expect(editBlock).toContain('onSaved?.(\'Profile updated\')');
+    expect(styles).toContain('.profile-edit-sticky');
+    expect(styles).toContain('.profile-quick-actions');
+  });
+
   it('makes Notifications reachable from the mobile top bar without changing desktop notification routes', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const styles = readFileSync(resolve('src/styles.css'), 'utf8');
@@ -379,8 +432,8 @@ describe('Portal app shell', () => {
     expect(composerBlock).toContain('Scheduling is prepared in the composer');
     expect(profileBlock).toContain('profile-cover');
     expect(profileBlock).toContain('Events attended');
-    expect(profileBlock).toContain('Pinned posts');
-    expect(profileBlock).toContain('Share profile');
+    expect(profileBlock).toContain("['Posts', 'Replies', 'Media']");
+    expect(profileBlock).toContain('Share Profile');
     expect(eventCardBlock).toContain('Hosted by');
     expect(eventCardBlock).toContain('interested');
     expect(eventCardBlock).toContain('going');

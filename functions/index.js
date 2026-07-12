@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import { Buffer } from 'node:buffer';
 import { createHash, randomUUID } from 'node:crypto';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
@@ -20,6 +21,7 @@ import { normaliseViewerKey, safeDeviceType, shouldCountView } from './post-view
 initializeApp();
 setGlobalOptions({ region: 'europe-west2' });
 const db = getFirestore();
+const storage = getStorage();
 
 const PRODUCTION_PROVIDER_ROLLOUT = [
   {
@@ -234,6 +236,63 @@ export const createPortalPost = onCall(async (request) => {
 
 function postAuthor(post = {}) { return post.authorUid || post.createdBy || null; }
 function postAttribution(post = {}) { return { originalAuthorUid: postAuthor(post), originalHandleSnapshot: post.authorHandle || post.handle || null, originalPublishedAt: post.publishedAt || post.createdAt || null }; }
+
+
+async function deleteQueryDocuments(query, batchSize = 300) {
+  const snapshot = await query.limit(batchSize).get();
+  if (snapshot.empty) return 0;
+  const batch = db.batch();
+  snapshot.docs.forEach((docSnapshot) => batch.delete(docSnapshot.ref));
+  await batch.commit();
+  if (snapshot.size < batchSize) return snapshot.size;
+  return snapshot.size + await deleteQueryDocuments(query, batchSize);
+}
+
+async function deletePostMediaObjects(post = {}) {
+  const paths = [
+    ...(Array.isArray(post.photos) ? post.photos.map((item) => item.path).filter(Boolean) : []),
+    post.video?.path,
+    post.video?.thumbnailPath,
+  ].filter(Boolean);
+  const bucket = storage.bucket();
+  await Promise.all(paths.map((path) => bucket.file(path).delete({ ignoreNotFound: true }).catch((error) => logger.warn('Post media cleanup failed', { path, message: error.message }))));
+}
+
+export const deletePortalPost = onCall(async (request) => {
+  const uid = requireAuth(request); const postId = String(request.data?.postId || '').trim();
+  if (!postId) throw new HttpsError('invalid-argument', 'Choose a Post to delete.');
+  const postRef = db.collection('posts').doc(postId);
+  let postData = null;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(postRef);
+    if (!snapshot.exists) throw new HttpsError('not-found', 'Post not found.');
+    const post = snapshot.data() || {};
+    if (postAuthor(post) !== uid) throw new HttpsError('permission-denied', 'Only the Post author can delete this Post.');
+    postData = post;
+    transaction.delete(postRef);
+    transaction.set(db.collection('postDeletions').doc(postId), {
+      postId,
+      authorUid: uid,
+      deletedByUid: uid,
+      deletedAt: FieldValue.serverTimestamp(),
+      mediaPaths: [
+        ...(Array.isArray(post.photos) ? post.photos.map((item) => item.path).filter(Boolean) : []),
+        post.video?.path,
+        post.video?.thumbnailPath,
+      ].filter(Boolean),
+    }, { merge: true });
+  });
+  await Promise.all([
+    removeEntry('Post', postId).catch(() => {}),
+    deleteQueryDocuments(db.collection('postLikes').where('postId', '==', postId)),
+    deleteQueryDocuments(db.collection('postBookmarks').where('postId', '==', postId)),
+    deleteQueryDocuments(db.collection('postReplies').where('postId', '==', postId)),
+    deleteQueryDocuments(db.collection('postEchoes').where('sourcePostId', '==', postId)),
+    deleteQueryDocuments(db.collection('quoteEchoes').where('sourcePostId', '==', postId)),
+    deletePostMediaObjects(postData || {}),
+  ]);
+  return { deleted: true, postId };
+});
 
 export const echoPortalPost = onCall(async (request) => {
   const echoingUid = requireAuth(request); const postId = String(request.data?.postId || '');
