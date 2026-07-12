@@ -142,6 +142,33 @@ describe('Portal app shell', () => {
 
 
 
+
+  it('makes Notifications reachable from the mobile top bar without changing desktop notification routes', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const topbarBlock = source.match(/function Topbar\([\s\S]*?\nfunction BottomNav/)?.[0] || '';
+    const appBlock = source.match(/export function App\([\s\S]*?\n}\n$/)?.[0] || '';
+    const notificationBlock = source.match(/function Notifications\([\s\S]*?\n}\n\nfunction Messages/)?.[0] || '';
+    expect(topbarBlock).toContain('unreadCount = 0');
+    expect(topbarBlock).toContain('href="#/notifications"');
+    expect(topbarBlock).toContain('Icon name="notifications"');
+    expect(topbarBlock).toContain('notification-badge');
+    expect(topbarBlock).toContain('unread notifications');
+    expect(topbarBlock).toContain('href="#/profile"');
+    expect(appBlock).toContain('observePortalNotifications(user.uid');
+    expect(appBlock).toContain('const unreadNotificationCount = shellNotifications.filter((item) => !item.read && item.archived !== true).length;');
+    expect(appBlock).toContain('<Topbar profile={profile} unreadCount={unreadNotificationCount} />');
+    expect(notificationBlock).toContain('markPortalNotificationRead(user.uid, item.id)');
+    expect(notificationBlock).toContain('markAllPortalNotificationsRead(user.uid, filtered)');
+    expect(notificationBlock).toContain('const activeItems = items.filter((item) => item.archived !== true);');
+    expect(notificationBlock).toContain("window.location.hash = `#/posts/${item.postId}`");
+    expect(notificationBlock).toContain("window.location.hash = `#/events/${item.eventId}`");
+    expect(styles).toContain('height:calc(var(--topbar-h) + env(safe-area-inset-top))');
+    expect(styles).toContain('.notification-badge');
+    expect(styles).toContain('.bottom-nav{display:flex');
+    expect(source).toContain("['/', '/events', '/vortex', '/messages', '/profile']");
+  });
+
   it('renders a dedicated mobile Profile setup without desktop file controls', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const styles = readFileSync(resolve('src/styles.css'), 'utf8');
