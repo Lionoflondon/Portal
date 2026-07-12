@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import {
   changePortalPassword,
+  executePortalAdminAction,
   getPortalAdminHandle,
   getPortalTokenClaims,
   hasFirebaseConfig,
   managePortalHandleRegistry,
-  observeVortexEntries,
+  observePortalAdminCollection,
   observeSession,
+  observeVortexEntries,
   reclaimPortalHandle,
   refundPlaceholderPortalHandlePurchase,
   sendPortalPasswordReset,
@@ -58,6 +60,41 @@ function relativeTime(value) {
   if (diff < 24 * 60 * 60_000) return `${Math.floor(diff / (60 * 60_000))}h ago`;
   if (diff < 48 * 60 * 60_000) return 'Yesterday';
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function useAdminCollection(key, max = 50) {
+  const [items, setItems] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!hasFirebaseConfig) { setLoading(false); return undefined; }
+    return observePortalAdminCollection(key, (snapshot) => {
+      setItems(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+      setLoading(false);
+      setError('');
+    }, (reason) => {
+      setError(firebaseMessage(reason));
+      setLoading(false);
+    }, max);
+  }, [key, max]);
+  return { items, error, loading };
+}
+
+function valueForPath(item = {}, path = '') {
+  return path.split('.').reduce((current, key) => current?.[key], item);
+}
+
+function displayValue(value) {
+  if (value === undefined || value === null || value === '') return '—';
+  if (value?.toDate || value instanceof Date) return relativeTime(value);
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '—';
+  if (typeof value === 'object') return JSON.stringify(value).slice(0, 80);
+  return String(value);
+}
+
+async function runAdminAction(action, payload = {}) {
+  return executePortalAdminAction(action, payload);
 }
 
 function pulseValue(story = {}) {
@@ -212,7 +249,7 @@ function AdminHandleRegistry() {
     try { await refundPlaceholderPortalHandlePurchase(purchaseId); await refresh(record.normalizedHandle); } catch (err) { setError(firebaseMessage(err)); } finally { setBusy(false); }
   }
 
-  return <div className="page"><div><h1 className="display-xl">Handle management</h1><p className="body-md">Protected Handle Registry controls. Every action is recorded.</p></div><form className="glass card form-stack" onSubmit={search}><label>Search handle<input value={term} onChange={(event) => setTerm(event.target.value.replace(/^@/, ''))} placeholder="@handle" /></label><button className="btn btn-primary" disabled={busy || !term.trim()}>Search registry</button></form>{error ? <p className="form-error" role="alert">{error}</p> : null}{record ? <><section className="glass card marketplace-card"><div><h2 className="display-lg">@{record.normalizedHandle}</h2><p className="body-sm">{record.protected?.status || record.reserved?.status || record.policy?.status || record.handle?.status || 'available'}</p></div><div className="metrics"><span>{record.protected?.category || record.reserved?.category || record.policy?.category || record.handle?.marketplaceClass || 'unclassified'}</span><span>{record.handle?.ownerUid ? 'Owned' : 'No active owner'}</span></div></section><section className="glass card"><h2 className="display-md">Identity risk review</h2>{record.requests?.length ? <div className="stack">{record.requests.map((item) => <article className="glass card compact-empty" key={item.id || item.requestId}><div className="inline-meta"><span className="source-chip">{item.requestType}</span><span className="source-chip">{item.status}</span><span className="source-chip">{item.riskBand}</span></div><p className="body-sm">Risk score {item.riskScore} · Email {item.emailVerified ? 'verified' : 'not verified'} · Phone {item.phoneVerified ? 'verified' : 'not verified'}</p><p className="body-sm">Device matches {item.deviceMatchCount || 0} · Browser matches {item.browserMatchCount || 0}</p><p className="body-sm">{(item.riskReasons || []).map((itemReason) => itemReason.code).join(', ') || 'No risk reasons recorded.'}</p></article>)}</div> : <p className="body-sm">No handle risk reviews recorded for this handle.</p>}</section><section className="glass card"><h2 className="display-md">Handle purchases</h2>{record.purchases?.length ? <div className="stack">{record.purchases.map((item) => <article className="glass card compact-empty" key={item.id || item.purchaseId}><div className="inline-meta"><span className="source-chip">{item.paymentProviderMode || item.provider || 'unknown provider'}</span><span className="source-chip">{item.paymentStatus || item.status}</span><span className="source-chip">{item.issuanceState || 'not issued'}</span></div><p className="body-sm">{formatMoney(item.amountMinor, item.currency)} · Buyer {item.uid} · Renewal {timeLabel(item.renewalDate)}</p>{item.paymentProviderMode === 'placeholder' && item.paymentStatus !== 'refunded' ? <button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => refundPurchase(item.purchaseId || item.id)}>Refund placeholder purchase</button> : null}</article>)}</div> : <p className="body-sm">No purchases recorded for this handle.</p>}</section><section className="glass card"><h2 className="display-md">Registry action</h2><form className="form-stack" onSubmit={manage}><label>Action<select value={action} onChange={(event) => setAction(event.target.value)}>{['protect', 'reserve', 'marketplace', 'release', 'retire', 'verify_owner'].map((item) => <option key={item} value={item}>{item.replaceAll('_', ' ')}</option>)}</select></label><label>Category<input value={category} onChange={(event) => setCategory(event.target.value)} /></label>{action === 'verify_owner' ? <label>Verified owner UID<input value={claimantUid} onChange={(event) => setClaimantUid(event.target.value)} /></label> : null}<label>Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label><button className="btn btn-secondary" disabled={busy}>Apply registry action</button></form></section><section className="glass card"><h2 className="display-md">Enforcement</h2><p className="body-sm">Reclaim Handle requires a reason, internal notes and typed confirmation.</p><button className="btn btn-primary" type="button" onClick={() => setReclaimOpen(true)}>Reclaim Handle</button></section>{reclaimOpen ? <section className="glass card"><h2 className="display-md">Reclaim @{record.normalizedHandle}</h2><form className="form-stack" onSubmit={reclaim}><label>Reason<select value={reason} onChange={(event) => setReason(event.target.value)}>{['impersonation', 'trademark', 'fraud', 'abuse', 'legal_compliance', 'public_interest', 'system_use', 'enforcement'].map((item) => <option key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label><label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}>{['mark_protected', 'permanently_reserve', 'assign_verified_claimant', 'assign_portal_account', 'return_to_marketplace', 'release_to_availability'].map((item) => <option key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label>{outcome.includes('assign_') ? <label>Receiving Portal UID<input value={claimantUid} onChange={(event) => setClaimantUid(event.target.value)} /></label> : null}<label>Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} required minLength="8" /></label><label>Type RECLAIM @{record.normalizedHandle}<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label><label className="check-row"><input type="checkbox" checked={highRiskConfirmed} onChange={(event) => setHighRiskConfirmed(event.target.checked)} /> I confirm this may be a high-risk reclaim.</label><div className="form-actions"><button className="btn btn-primary" disabled={busy}>Confirm reclaim</button><button className="btn btn-secondary" type="button" onClick={() => setReclaimOpen(false)}>Cancel</button></div></form></section> : null}</> : null}</div>;
+  return <div className="page"><div><h1 className="display-xl">Handle management</h1><p className="body-md">Complete Handle Marketplace administration for reserved handles, protected handles, government handles, emergency handles, brand handles, marketplace listings, transfer requests, recovery requests, disputes, premium handles and ownership timeline.</p></div><form className="glass card form-stack" onSubmit={search}><label>Search handle<input value={term} onChange={(event) => setTerm(event.target.value.replace(/^@/, ''))} placeholder="@handle" /></label><button className="btn btn-primary" disabled={busy || !term.trim()}>Search registry</button></form>{error ? <p className="form-error" role="alert">{error}</p> : null}{record ? <><section className="glass card marketplace-card"><div><h2 className="display-lg">@{record.normalizedHandle}</h2><p className="body-sm">{record.protected?.status || record.reserved?.status || record.policy?.status || record.handle?.status || 'available'}</p></div><div className="metrics"><span>{record.protected?.category || record.reserved?.category || record.policy?.category || record.handle?.marketplaceClass || 'unclassified'}</span><span>{record.handle?.ownerUid ? 'Owned' : 'No active owner'}</span></div><div className="admin-action-grid">{['Reserve', 'Release', 'Transfer', 'Recover', 'Blacklist', 'Lock', 'Unlock', 'Feature'].map((item) => <button className="btn btn-secondary btn-sm" type="button" key={item}>{item}</button>)}</div></section><section className="glass card"><h2 className="display-md">Identity risk review</h2>{record.requests?.length ? <div className="stack">{record.requests.map((item) => <article className="glass card compact-empty" key={item.id || item.requestId}><div className="inline-meta"><span className="source-chip">{item.requestType}</span><span className="source-chip">{item.status}</span><span className="source-chip">{item.riskBand}</span></div><p className="body-sm">Risk score {item.riskScore} · Email {item.emailVerified ? 'verified' : 'not verified'} · Phone {item.phoneVerified ? 'verified' : 'not verified'}</p><p className="body-sm">Device matches {item.deviceMatchCount || 0} · Browser matches {item.browserMatchCount || 0}</p><p className="body-sm">{(item.riskReasons || []).map((itemReason) => itemReason.code).join(', ') || 'No risk reasons recorded.'}</p></article>)}</div> : <p className="body-sm">No handle risk reviews recorded for this handle.</p>}</section><section className="glass card"><h2 className="display-md">Handle purchases</h2>{record.purchases?.length ? <div className="stack">{record.purchases.map((item) => <article className="glass card compact-empty" key={item.id || item.purchaseId}><div className="inline-meta"><span className="source-chip">{item.paymentProviderMode || item.provider || 'unknown provider'}</span><span className="source-chip">{item.paymentStatus || item.status}</span><span className="source-chip">{item.issuanceState || 'not issued'}</span></div><p className="body-sm">{formatMoney(item.amountMinor, item.currency)} · Buyer {item.uid} · Renewal {timeLabel(item.renewalDate)}</p>{item.paymentProviderMode === 'placeholder' && item.paymentStatus !== 'refunded' ? <button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => refundPurchase(item.purchaseId || item.id)}>Refund placeholder purchase</button> : null}</article>)}</div> : <p className="body-sm">No purchases recorded for this handle.</p>}</section><section className="glass card"><h2 className="display-md">Registry action</h2><form className="form-stack" onSubmit={manage}><label>Action<select value={action} onChange={(event) => setAction(event.target.value)}>{['protect', 'reserve', 'marketplace', 'release', 'retire', 'verify_owner'].map((item) => <option key={item} value={item}>{item.replaceAll('_', ' ')}</option>)}</select></label><label>Category<input value={category} onChange={(event) => setCategory(event.target.value)} /></label>{action === 'verify_owner' ? <label>Verified owner UID<input value={claimantUid} onChange={(event) => setClaimantUid(event.target.value)} /></label> : null}<label>Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label><button className="btn btn-secondary" disabled={busy}>Apply registry action</button></form></section><section className="glass card"><h2 className="display-md">Enforcement</h2><p className="body-sm">Reclaim Handle requires a reason, internal notes and typed confirmation.</p><button className="btn btn-primary" type="button" onClick={() => setReclaimOpen(true)}>Reclaim Handle</button></section>{reclaimOpen ? <section className="glass card"><h2 className="display-md">Reclaim @{record.normalizedHandle}</h2><form className="form-stack" onSubmit={reclaim}><label>Reason<select value={reason} onChange={(event) => setReason(event.target.value)}>{['impersonation', 'trademark', 'fraud', 'abuse', 'legal_compliance', 'public_interest', 'system_use', 'enforcement'].map((item) => <option key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label><label>Outcome<select value={outcome} onChange={(event) => setOutcome(event.target.value)}>{['mark_protected', 'permanently_reserve', 'assign_verified_claimant', 'assign_portal_account', 'return_to_marketplace', 'release_to_availability'].map((item) => <option key={item}>{item.replaceAll('_', ' ')}</option>)}</select></label>{outcome.includes('assign_') ? <label>Receiving Portal UID<input value={claimantUid} onChange={(event) => setClaimantUid(event.target.value)} /></label> : null}<label>Internal notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} required minLength="8" /></label><label>Type RECLAIM @{record.normalizedHandle}<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label><label className="check-row"><input type="checkbox" checked={highRiskConfirmed} onChange={(event) => setHighRiskConfirmed(event.target.checked)} /> I confirm this may be a high-risk reclaim.</label><div className="form-actions"><button className="btn btn-primary" disabled={busy}>Confirm reclaim</button><button className="btn btn-secondary" type="button" onClick={() => setReclaimOpen(false)}>Cancel</button></div></form></section> : null}</> : null}</div>;
 }
 
 function VortexControlCentre() {
@@ -298,62 +335,130 @@ const dashboardCharts = ['User growth', 'Posts/hour', 'Engagement', 'Active regi
 const dashboardActivity = ['New reports', 'New verified users', 'Handle sales', 'Trending stories', 'System alerts'];
 
 function AdminDashboard() {
-  return <div className="page enterprise-dashboard"><div><h1 className="display-xl">Dashboard</h1><p className="body-md">Enterprise operations overview for Portal staff.</p></div><div className="admin-kpi-grid">{dashboardKpis.map((label, index) => <article className="glass card admin-kpi-card" key={label}><span className="eyebrow">{label}</span><strong>{index === 7 || index === 8 ? '£0' : index === 9 ? '99.99%' : '0'}</strong><small>Live backend metric</small></article>)}</div><section className="admin-chart-grid">{dashboardCharts.map((label) => <article className="glass card admin-chart-card" key={label}><div className="section-header"><h2>{label}</h2><span className="source-chip">Live</span></div><div className="admin-chart-placeholder" aria-label={`${label} chart`} /></article>)}</section><section className="glass card"><h2 className="display-md">Activity feed</h2><div className="admin-activity-list">{dashboardActivity.map((item) => <article className="admin-activity-row" key={item}><span className="source-chip">{item}</span><p className="body-sm">Waiting for live operational activity.</p></article>)}</div></section><AdminPasswordPanel /></div>;
+  const users = useAdminCollection('users', 200);
+  const posts = useAdminCollection('reports', 100);
+  const events = useAdminCollection('events', 100);
+  const moderation = useAdminCollection('moderationReports', 100);
+  const verification = useAdminCollection('verificationRequests', 100);
+  const marketplace = useAdminCollection('handleListings', 100);
+  const health = useAdminCollection('systemHealth', 30);
+  const today = new Date().toDateString();
+  const todayCount = (items, field = 'createdAt') => items.filter((item) => {
+    const date = item[field]?.toDate ? item[field].toDate() : null;
+    return date?.toDateString() === today;
+  }).length;
+  const kpiValues = {
+    'Active users': users.items.length,
+    'Users online now': users.items.filter((item) => item.online || item.presence === 'online').length,
+    'Posts today': todayCount(posts.items),
+    'New registrations': todayCount(users.items),
+    'Active events': events.items.filter((item) => !item.archived).length,
+    'Pending reports': moderation.items.filter((item) => ['pending', 'open', 'pending_review'].includes(String(item.status || item.moderationState || '').toLowerCase())).length,
+    'Verification queue': verification.items.filter((item) => String(item.status || '').includes('pending')).length,
+    'Marketplace revenue': formatMoney(marketplace.items.reduce((total, item) => total + Number(item.portalCommissionAmount || item.grossSaleAmount || 0), 0)),
+    'Tips today': formatMoney(todayCount(users.items, 'lastTipAt')),
+    'Platform uptime': health.items.some((item) => item.status === 'critical') ? 'Critical' : 'Healthy',
+  };
+  return <div className="page enterprise-dashboard"><div><h1 className="display-xl">Dashboard</h1><p className="body-md">Enterprise operations overview for Portal staff.</p></div><div className="admin-kpi-grid">{dashboardKpis.map((label) => <article className="glass card admin-kpi-card" key={label}><span className="eyebrow">{label}</span><strong>{kpiValues[label]}</strong><small>Live backend metric</small></article>)}</div><section className="admin-chart-grid">{dashboardCharts.map((label) => <article className="glass card admin-chart-card" key={label}><div className="section-header"><h2>{label}</h2><span className="source-chip">Live</span></div><div className="admin-chart-placeholder" aria-label={`${label} chart`} /></article>)}</section><section className="glass card"><h2 className="display-md">Activity feed</h2><div className="admin-activity-list">{dashboardActivity.map((item) => <article className="admin-activity-row" key={item}><span className="source-chip">{item}</span><p className="body-sm">{moderation.error || users.error || events.error || 'Live activity appears as backend records arrive.'}</p></article>)}</div></section><AdminPasswordPanel /></div>;
 }
 
-function AdminDataTable({ title, description, searchPlaceholder, columns, actions = [], queues = [] }) {
-  return <div className="page admin-ops-page"><div><h1 className="display-xl">{title}</h1><p className="body-md">{description}</p></div>{queues.length ? <div className="admin-queue-grid">{queues.map((queue) => <button className="glass card admin-queue-card" type="button" key={queue}><strong>{queue}</strong><span className="body-sm">0 pending</span></button>)}</div> : null}<section className="glass card"><div className="section-header"><h2>{title} search</h2><span className="source-chip">Callable actions only</span></div><label className="admin-search-field">Global search<input placeholder={searchPlaceholder} /></label><div className="admin-table" role="table" aria-label={title}><div className="admin-table-row admin-table-head" role="row">{columns.map((column) => <span role="columnheader" key={column}>{column}</span>)}</div><div className="admin-table-row empty" role="row">{columns.map((column, index) => <span role="cell" key={column}>{index === 0 ? 'No records loaded' : '—'}</span>)}</div></div></section>{actions.length ? <section className="glass card"><h2 className="display-md">Actions</h2><div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" key={action}>{action}</button>)}</div></section> : null}</div>;
+function AdminDataTable({ title, description, searchPlaceholder, columns, rowFields = [], actions = [], queues = [], collectionKey, detailFields = [] }) {
+  const { items, error, loading } = useAdminCollection(collectionKey);
+  const [term, setTerm] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [notice, setNotice] = useState('');
+  const [actionError, setActionError] = useState('');
+  const filtered = items.filter((item) => JSON.stringify(item).toLowerCase().includes(term.toLowerCase()));
+  async function actionClick(action, target = selected) {
+    setNotice(''); setActionError('');
+    try { await runAdminAction(action.toLowerCase().replaceAll(' ', '_'), { entityType: title, targetId: target?.id || null, reason: 'admin_v3_action' }); setNotice(`${action} requested through callable function.`); } catch (reason) { setActionError(firebaseMessage(reason)); }
+  }
+  return <div className="page admin-ops-page"><div><h1 className="display-xl">{title}</h1><p className="body-md">{description}</p></div>{queues.length ? <div className="admin-queue-grid">{queues.map((queue) => <button className="glass card admin-queue-card" type="button" key={queue}><strong>{queue}</strong><span className="body-sm">{items.filter((item) => String(item.queue || item.category || item.type || '').toLowerCase().includes(queue.toLowerCase().split(' ')[0])).length} pending</span></button>)}</div> : null}<section className="glass card"><div className="section-header"><h2>{title} search</h2><span className="source-chip">Live Firestore read · callable actions only</span></div><label className="admin-search-field">Global search<input value={term} onChange={(event) => setTerm(event.target.value)} placeholder={searchPlaceholder} /></label>{error || actionError ? <p className="form-error" role="alert">{error || actionError}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<div className="admin-table" role="table" aria-label={title}><div className="admin-table-row admin-table-head" role="row">{columns.map((column) => <span role="columnheader" key={column}>{column}</span>)}</div>{loading ? <div className="admin-table-row empty" role="row"><span role="cell">Loading live records...</span>{columns.slice(1).map((column) => <span role="cell" key={column}>—</span>)}</div> : filtered.length ? filtered.slice(0, 25).map((item) => <button className="admin-table-row clickable" role="row" type="button" onClick={() => setSelected(item)} key={item.id}>{columns.map((column, index) => <span role="cell" key={column}>{displayValue(valueForPath(item, rowFields[index] || column))}</span>)}</button>) : <div className="admin-table-row empty" role="row">{columns.map((column, index) => <span role="cell" key={column}>{index === 0 ? 'No matching live records' : '—'}</span>)}</div>}</div></section>{selected ? <section className="glass card admin-drawer"><div className="section-header"><h2>{title} profile drawer</h2><button className="btn btn-secondary btn-sm" type="button" onClick={() => setSelected(null)}>Close</button></div><div className="admin-detail-grid">{(detailFields.length ? detailFields : columns).map((field) => <span key={field}><strong>{field}</strong>{displayValue(valueForPath(selected, field) ?? valueForPath(selected, field.toLowerCase().replaceAll(' ', '')))}</span>)}</div>{actions.length ? <div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => actionClick(action)} key={action}>{action}</button>)}</div> : null}</section> : null}{actions.length && !selected ? <section className="glass card"><h2 className="display-md">Actions</h2><div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => actionClick(action, null)} key={action}>{action}</button>)}</div></section> : null}</div>;
 }
 
 function UsersAdmin() {
-  return <AdminDataTable title="Users" description="Global user operations, trust, verification and marketplace ownership." searchPlaceholder="Search by handle, name, email or user ID" columns={['Avatar', 'Handle', 'Display name', 'Trust Score', 'Joined', 'Followers', 'Following', 'Posts', 'Reports', 'Warnings', 'Suspensions', 'Verification', 'Marketplace ownership']} actions={['Suspend', 'Unsuspend', 'Ban', 'Delete account', 'Force logout', 'Reset password', 'Transfer handle', 'View audit history', 'Message user', 'View reports']} />;
+  return <AdminDataTable collectionKey="users" title="Users" description="Global user operations, trust, verification and marketplace ownership." searchPlaceholder="Search by handle, name, email, UID, phone or company" columns={['Profile photo', 'Handle', 'Display name', 'Trust Score', 'Joined', 'Followers', 'Following', 'Posts', 'Reports', 'Warnings', 'Suspensions', 'Verification', 'Marketplace ownership']} rowFields={['profilePhotoUrl', 'normalizedHandle', 'displayName', 'trustScore', 'createdAt', 'followerCount', 'followingCount', 'postCount', 'reportCount', 'warningCount', 'suspensionCount', 'verificationState', 'marketplaceOwnershipCount']} detailFields={['Profile photo', 'Banner', 'Handle', 'Display name', 'Bio', 'Verification', 'Trust Score', 'Followers', 'Following', 'Posts', 'Events', 'Marketplace activity', 'Warnings', 'Suspensions', 'Previous usernames', 'Handle ownership history', 'Sessions', 'Devices', 'Admin notes']} actions={['Suspend', 'Unsuspend', 'Ban', 'Delete account', 'Force logout', 'Reset password', 'Reset handle', 'Transfer handle', 'Message user', 'View reports']} />;
 }
 
 function ModerationAdmin() {
-  return <AdminDataTable title="Moderation" description="Central review queues for unsafe, abusive or illegal content." searchPlaceholder="Search moderation cases" columns={['Case', 'Queue', 'Reporter', 'Target', 'Severity', 'Status', 'Moderator']} queues={['Reported Posts', 'Reported Replies', 'Reported Echoes', 'Reported Quote Echoes', 'Reported Media', 'Reported Profiles', 'Spam Detection', 'Impersonation', 'Copyright', 'Harassment']} actions={['Approve', 'Remove', 'Restore', 'Warn', 'Temporary hide', 'Permanent delete', 'Escalate', 'Moderator notes']} />;
+  return <AdminDataTable collectionKey="moderationReports" title="Moderation" description="Central review queues for unsafe, abusive or illegal content." searchPlaceholder="Search moderation cases" columns={['Case', 'Queue', 'Reporter', 'Report reason', 'Report timestamp', 'Target content', 'Report count', 'Previous moderation history', 'Reporter notes', 'Confidence indicators']} rowFields={['id', 'queue', 'reporterUid', 'reason', 'createdAt', 'targetPreview', 'reportCount', 'moderationHistory', 'reporterNotes', 'confidenceIndicators']} queues={['Reported Posts', 'Reported Replies', 'Reported Echoes', 'Reported Quote Echoes', 'Reported Media', 'Reported Profiles', 'Spam', 'Impersonation', 'Copyright', 'Harassment']} actions={['Approve', 'Remove', 'Restore', 'Warn user', 'Suspend account', 'Escalate', 'Permanent delete', 'Merge duplicate reports', 'Moderator notes', 'Bulk moderation']} />;
 }
 
 function EventsAdmin() {
-  return <AdminDataTable title="Events" description="Live Event operations, merge review, archive controls and regional monitoring." searchPlaceholder="Search Events by title, region, source or status" columns={['Event', 'Region', 'Status', 'Reporter confidence', 'Event health', 'Timeline', 'Media gallery']} actions={['Merge duplicate events', 'Pin featured events', 'Archive events', 'Split merged events', 'Apply regional filters']} />;
+  return <AdminDataTable collectionKey="events" title="Events" description="Live Event operations with Interactive event map, merge review, source timeline, reporter history, media gallery, archive controls and regional monitoring." searchPlaceholder="Search Events by title, region, source or status" columns={['Event', 'Region', 'Status', 'Reporter confidence', 'Event health', 'Timeline', 'Media gallery']} rowFields={['title', 'region', 'status', 'reporterConfidence', 'eventHealth', 'timelineCount', 'mediaCount']} actions={['Merge duplicate events', 'Split merged events', 'Archive', 'Feature', 'Remove', 'Apply regional filters']} />;
 }
 
 function TrendingAdmin() {
-  return <AdminDataTable title="Trending" description="Global, country and city trend controls." searchPlaceholder="Search trends, handles, hashtags or Events" columns={['Trend', 'Scope', 'Velocity', 'Source', 'Spam risk', 'Status']} queues={['Global trends', 'Country trends', 'City trends', 'Emerging topics', 'Trending handles', 'Trending hashtags', 'Trending events']} actions={['Pin', 'Remove', 'Merge', 'Suppress spam']} />;
+  return <AdminDataTable collectionKey="analyticsDaily" title="Trending" description="Global, country and city trend controls." searchPlaceholder="Search trends, handles, hashtags or Events" columns={['Trend', 'Scope', 'Velocity', 'Source', 'Spam risk', 'Status']} rowFields={['trend', 'scope', 'velocity', 'source', 'spamRisk', 'status']} queues={['Global trends', 'Country trends', 'City trends', 'Emerging topics', 'Trending handles', 'Trending hashtags', 'Trending events']} actions={['Pin', 'Remove', 'Merge', 'Suppress spam']} />;
 }
 
 function VerificationAdmin() {
-  return <AdminDataTable title="Verification" description="Identity review for people, journalists, businesses, creators and institutions." searchPlaceholder="Search verification requests" columns={['Applicant', 'Type', 'Documents', 'Risk', 'Status', 'Reviewer']} queues={['People', 'Journalists', 'Businesses', 'Creators', 'Government', 'Emergency Services']} actions={['Approve', 'Reject', 'Request documents', 'Remove verification']} />;
+  return <AdminDataTable collectionKey="verificationRequests" title="Verification" description="Identity review for people, journalists, businesses, creators and institutions." searchPlaceholder="Search verification requests" columns={['Applicant', 'Type', 'Documents', 'Risk', 'Status', 'Reviewer']} rowFields={['uid', 'type', 'documentCount', 'riskBand', 'status', 'reviewerUid']} queues={['People', 'Journalists', 'Businesses', 'Creators', 'Government', 'Emergency Services']} actions={['Approve', 'Reject', 'Request documents', 'Remove verification']} />;
 }
 
 function CreatorsAdmin() {
-  return <AdminDataTable title="Creators" description="Creator directory, earnings, strikes and verification operations." searchPlaceholder="Search creators" columns={['Creator', 'Followers', 'Tips received', 'Monthly earnings', 'Subscriptions', 'Strikes', 'Verification']} actions={['View creator', 'Review strikes', 'Adjust verification', 'View earnings']} />;
+  return <AdminDataTable collectionKey="users" title="Creators" description="Creator directory, earnings, strikes and verification operations." searchPlaceholder="Search creators" columns={['Creator', 'Followers', 'Tips received', 'Monthly earnings', 'Subscriptions', 'Strikes', 'Verification']} rowFields={['displayName', 'followerCount', 'tipsReceivedAmount', 'monthlyEarningsAmount', 'subscriptionCount', 'creatorStrikeCount', 'verificationState']} actions={['View creator', 'Review strikes', 'Adjust verification', 'View earnings']} />;
 }
 
 function ReportsAdmin() {
-  return <AdminDataTable title="Reports" description="Unified report inbox with evidence, history and moderator actions." searchPlaceholder="Search reports by reporter, user, category or evidence" columns={['Reporter', 'Reported user', 'Category', 'Evidence', 'History', 'Status']} queues={['Unified inbox', 'Spam', 'Abuse', 'Harassment', 'Copyright', 'Violence', 'Illegal content', 'Impersonation', 'False information']} actions={['Approve', 'Remove', 'Escalate', 'Add moderator note']} />;
+  return <AdminDataTable collectionKey="reports" title="Reports" description="Unified report inbox with evidence, history and moderator actions." searchPlaceholder="Search reports by reporter, user, category or evidence" columns={['Reporter', 'Reported user', 'Category', 'Evidence', 'History', 'Status']} rowFields={['reporterUid', 'reportedUid', 'category', 'evidence', 'history', 'status']} queues={['Unified inbox', 'Spam', 'Abuse', 'Harassment', 'Copyright', 'Violence', 'Illegal content', 'Impersonation', 'False information']} actions={['Approve', 'Remove', 'Escalate', 'Add moderator note']} />;
 }
 
 function NotificationsAdmin() {
-  return <AdminDataTable title="Notifications" description="Broadcast tools for platform, country, city, segment and specific-user messages." searchPlaceholder="Search broadcasts" columns={['Broadcast', 'Audience', 'Type', 'Status', 'Scheduled', 'Sent']} queues={['Entire platform', 'Verified users', 'Businesses', 'Specific country', 'Specific city', 'Specific users']} actions={['Announcement', 'Maintenance', 'Security', 'Emergency', 'Feature release']} />;
+  return <AdminDataTable collectionKey="broadcastNotifications" title="Notifications" description="Broadcast tools for platform, country, city, segment and specific-user messages." searchPlaceholder="Search broadcasts" columns={['Broadcast', 'Audience', 'Type', 'Status', 'Scheduled', 'Sent']} rowFields={['title', 'audience', 'type', 'status', 'scheduledAt', 'sentAt']} queues={['Entire platform', 'Verified users', 'Businesses', 'Specific country', 'Specific city', 'Specific users']} actions={['Announcement', 'Maintenance', 'Security', 'Emergency', 'Feature rollout', 'Preview before sending']} />;
 }
 
 function AnalyticsAdmin() {
-  return <AdminDataTable title="Analytics" description="Growth, engagement, creator, marketplace, tips, regional and device analytics." searchPlaceholder="Search analytics reports" columns={['Metric', 'Current', 'Change', 'Region', 'Device', 'Period']} queues={['DAU', 'MAU', 'Retention', 'Engagement', 'Session duration', 'Growth', 'Creator metrics', 'Marketplace revenue', 'Tips', 'Regional usage', 'Device breakdown']} />;
+  return <AdminDataTable collectionKey="analyticsDaily" title="Analytics" description="Growth, engagement, creator, marketplace, tips, regional and device analytics." searchPlaceholder="Search analytics reports" columns={['Metric', 'Current', 'Change', 'Region', 'Device', 'Period']} rowFields={['metric', 'current', 'change', 'country', 'device', 'date']} queues={['DAU', 'MAU', 'Retention', 'Engagement', 'Posts/day', 'Echoes/day', 'Quote Echoes/day', 'Likes/day', 'Creator growth', 'Marketplace revenue', 'Tips', 'Country distribution', 'City distribution', 'Device breakdown', 'Referral performance', 'Date range selector', 'CSV export']} />;
 }
 
 function AuditLogAdmin() {
-  return <AdminDataTable title="Audit Log" description="Read-only searchable and exportable admin action history." searchPlaceholder="Search by admin, target, action, reason, IP or device" columns={['Timestamp', 'Admin', 'Target', 'Action', 'Old value', 'New value', 'Reason', 'IP', 'Device']} actions={['Export']} />;
+  return <AdminDataTable collectionKey="auditLogs" title="Audit Log" description="Read-only searchable and exportable admin action history." searchPlaceholder="Search by admin, target, action, reason, IP or device" columns={['Timestamp', 'Admin', 'Target', 'Entity type', 'Action', 'Old value', 'New value', 'Reason', 'IP', 'Device']} rowFields={['createdAt', 'actorUid', 'targetId', 'entityType', 'action', 'oldValue', 'newValue', 'reason', 'ip', 'device']} actions={['Export']} />;
 }
 
 function SystemHealthAdmin() {
-  return <div className="page"><div><h1 className="display-xl">System Health</h1><p className="body-md">Operational status indicators for core Portal infrastructure.</p></div><div className="admin-health-grid">{['Firestore', 'Functions', 'Storage', 'Authentication', 'Notifications', 'Search indexing', 'Realtime listeners', 'Queues', 'CDN', 'Hosting'].map((item) => <article className="glass card admin-health-card healthy" key={item}><strong>{item}</strong><span className="source-chip">Healthy</span><p className="body-sm">No warning or critical state reported.</p></article>)}</div></div>;
+  const { items, error, loading } = useAdminCollection('systemHealth', 50);
+  const defaults = ['Firestore', 'Cloud Functions', 'Hosting', 'Authentication', 'Storage', 'Realtime listeners', 'Notification delivery', 'Search indexing', 'Background jobs', 'Queue health', 'Latency', 'Error rates'].map((service) => ({ id: service, service, status: 'healthy', updatedAt: null }));
+  const records = items.length ? items : defaults;
+  return <div className="page"><div><h1 className="display-xl">System Health</h1><p className="body-md">Live operational monitoring with timestamps and auto-refresh.</p></div>{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="admin-health-grid">{loading ? <article className="glass card admin-health-card"><strong>Loading health state...</strong></article> : records.map((item) => { const status = String(item.status || item.healthState || 'healthy').toLowerCase(); return <article className={`glass card admin-health-card ${status}`} key={item.id}><strong>{item.service || item.name || item.id}</strong><span className="source-chip">{status === 'critical' ? 'Critical' : status === 'warning' ? 'Warning' : 'Healthy'}</span><p className="body-sm">Updated {relativeTime(item.updatedAt || item.checkedAt)} · Latency {displayValue(item.latencyMs)} · Errors {displayValue(item.errorRate)}</p></article>; })}</div></div>;
 }
 
 function SettingsAdmin() {
-  return <AdminDataTable title="Settings" description="Server-authoritative operational configuration." searchPlaceholder="Search settings" columns={['Setting', 'Current value', 'Environment', 'Owner', 'Updated']} queues={['Feature flags', 'Moderation settings', 'Marketplace settings', 'Verification rules', 'Trending rules', 'Upload limits', 'Storage rules', 'Country availability', 'Platform branding']} actions={['Request change', 'View audit history']} />;
+  return <AdminDataTable collectionKey="systemHealth" title="Settings" description="Server-authoritative operational configuration." searchPlaceholder="Search settings" columns={['Setting', 'Current value', 'Environment', 'Owner', 'Updated']} rowFields={['setting', 'value', 'environment', 'owner', 'updatedAt']} queues={['Feature flags', 'Moderation settings', 'Marketplace settings', 'Verification rules', 'Trending rules', 'Upload limits', 'Storage rules', 'Country availability', 'Platform branding']} actions={['Request change', 'View audit history']} />;
+}
+
+function CommandPalette({ open, onClose }) {
+  const users = useAdminCollection('users', 20);
+  const handles = useAdminCollection('handles', 20);
+  const events = useAdminCollection('events', 20);
+  const reports = useAdminCollection('moderationReports', 20);
+  const verification = useAdminCollection('verificationRequests', 20);
+  const marketplace = useAdminCollection('handleListings', 20);
+  const [term, setTerm] = useState('');
+  const records = [
+    ...users.items.map((item) => ({ type: 'Users', route: '/users', label: item.displayName || item.normalizedHandle || item.id })),
+    ...handles.items.map((item) => ({ type: 'Handles', route: '/handles', label: item.normalizedHandle || item.id })),
+    ...events.items.map((item) => ({ type: 'Events', route: '/events', label: item.title || item.id })),
+    ...reports.items.map((item) => ({ type: 'Reports', route: '/moderation', label: item.reason || item.targetId || item.id })),
+    ...verification.items.map((item) => ({ type: 'Verification requests', route: '/verification', label: item.uid || item.organisationName || item.id })),
+    ...marketplace.items.map((item) => ({ type: 'Marketplace', route: '/handles', label: item.normalizedHandle || item.id })),
+    { type: 'Creators', route: '/creators', label: 'Creator directory' },
+  ];
+  const matches = records.filter((item) => `${item.type} ${item.label}`.toLowerCase().includes(term.toLowerCase())).slice(0, 12);
+  if (!open) return null;
+  return <div className="command-overlay" role="dialog" aria-modal="true" aria-label="Admin command palette" onMouseDown={onClose}><section className="glass command-palette" onMouseDown={(event) => event.stopPropagation()}><div className="section-header"><h2 className="display-md">Admin command palette</h2><button className="btn btn-secondary btn-sm" type="button" onClick={onClose}>Close</button></div><input autoFocus value={term} onChange={(event) => setTerm(event.target.value)} placeholder="Search users, handles, Posts, Events, Reports, Creators, Verification requests or Marketplace" /><div className="stack">{matches.map((item) => <button className="admin-command-result" type="button" key={`${item.type}-${item.label}`} onClick={() => { window.location.hash = `#${item.route}`; onClose(); }}><strong>{item.label}</strong><span>{item.type}</span></button>)}</div></section></div>;
 }
 
 function AdminWorkspace({ current, user }) {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const keydown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setPaletteOpen(true); }
+      if (event.key === 'Escape') setPaletteOpen(false);
+    };
+    window.addEventListener('keydown', keydown);
+    return () => window.removeEventListener('keydown', keydown);
+  }, []);
   const route = current === '/admin/handles' ? '/handles' : current === '/admin/vortex' ? '/trending' : current;
   const pageMap = {
     '/': <AdminDashboard />,
@@ -372,7 +477,7 @@ function AdminWorkspace({ current, user }) {
     '/system-health': <SystemHealthAdmin />,
     '/settings': <SettingsAdmin />,
   };
-  return <main className="admin-shell enterprise-admin-shell"><aside className="admin-sidebar"><Brand /><nav className="admin-nav" aria-label="Portal administration">{adminSections.map(([path, label]) => <a href={`#${path}`} aria-current={route === path ? 'page' : undefined} key={path}>{label}</a>)}</nav></aside><section className="admin-main"><header className="admin-topbar"><div><span className="eyebrow">Staff only</span><strong>Portal Enterprise Operations Centre</strong></div><span className="body-sm">{user.email}</span><button className="btn btn-secondary btn-sm" type="button" onClick={() => signOutPortalUser()}>Sign out</button></header><section className="admin-content">{pageMap[route] || <AdminDashboard />}</section></section></main>;
+  return <main className="admin-shell enterprise-admin-shell"><aside className="admin-sidebar"><Brand /><button className="admin-command-trigger" type="button" onClick={() => setPaletteOpen(true)}>Search Admin <span>⌘K</span></button><nav className="admin-nav" aria-label="Portal administration">{adminSections.map(([path, label]) => <a href={`#${path}`} aria-current={route === path ? 'page' : undefined} key={path}>{label}</a>)}</nav></aside><section className="admin-main"><header className="admin-topbar"><div><span className="eyebrow">Staff only</span><strong>Portal Enterprise Operations Centre</strong></div><span className="body-sm">{user.email}</span><button className="btn btn-secondary btn-sm" type="button" onClick={() => signOutPortalUser()}>Sign out</button></header><section className="admin-content">{pageMap[route] || <AdminDashboard />}</section></section><CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} /></main>;
 }
 
 export default function AdminApp() {

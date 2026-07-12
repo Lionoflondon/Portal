@@ -112,6 +112,8 @@ describe('Portal Admin authentication', () => {
   it('renders Portal Admin V2 enterprise navigation and operations surfaces', () => {
     const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
     const styles = readFileSync(resolve('src/admin/admin.css'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const functions = readFileSync(resolve('functions/index.js'), 'utf8');
     for (const label of ['Dashboard', 'Users', 'Moderation', 'Events', 'Trending', 'Verification', 'Handle Marketplace', 'Creators', 'Reports', 'Notifications', 'Analytics', 'Audit Log', 'System Health', 'Settings']) {
       expect(adminSource).toContain(label);
     }
@@ -125,7 +127,7 @@ describe('Portal Admin authentication', () => {
       expect(adminSource).toContain(activity);
     }
     expect(adminSource).toContain('function UsersAdmin');
-    expect(adminSource).toContain('Search by handle, name, email or user ID');
+    expect(adminSource).toContain('Search by handle, name, email, UID, phone or company');
     expect(adminSource).toContain('Trust Score');
     expect(adminSource).toContain('Force logout');
     expect(adminSource).toContain('function ModerationAdmin');
@@ -150,6 +152,7 @@ describe('Portal Admin authentication', () => {
     expect(adminSource).toContain('Old value');
     expect(adminSource).toContain('New value');
     expect(adminSource).toContain('function SystemHealthAdmin');
+    expect(adminSource).toContain("useAdminCollection('systemHealth'");
     expect(adminSource).toContain('Firestore');
     expect(adminSource).toContain('Functions');
     expect(adminSource).toContain('Search indexing');
@@ -162,5 +165,44 @@ describe('Portal Admin authentication', () => {
     expect(styles).toContain('.admin-kpi-grid');
     expect(styles).toContain('.admin-table');
     expect(styles).toContain('.admin-health-grid');
+    expect(service).toContain('observePortalAdminCollection');
+    expect(service).toContain('executePortalAdminAction');
+    expect(functions).toContain('export const executePortalAdminAction');
+    expect(functions).toContain('requirePortalAdmin(request)');
+    expect(functions).toContain("db.collection('auditLogs').doc()");
+    expect(functions).toContain("db.collection('adminActionTimeline').doc()");
+  });
+
+  it('connects Admin V3 live operations without direct client writes', () => {
+    const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    expect(adminSource).toContain('function useAdminCollection');
+    expect(adminSource).toContain('function AdminDataTable');
+    expect(adminSource).toContain('Reporter');
+    expect(adminSource).toContain('Report reason');
+    expect(adminSource).toContain('Target content');
+    expect(adminSource).toContain('Confidence indicators');
+    expect(adminSource).toContain('Bulk moderation');
+    expect(adminSource).toContain('Search by handle, name, email, UID, phone or company');
+    expect(adminSource).toContain('Profile photo');
+    expect(adminSource).toContain('Handle ownership history');
+    expect(adminSource).toContain('Sessions');
+    expect(adminSource).toContain('Devices');
+    expect(adminSource).toContain('ownership timeline');
+    expect(adminSource).toContain('Interactive event map');
+    expect(adminSource).toContain('CSV export');
+    expect(adminSource).toContain('Date range selector');
+    expect(adminSource).toContain('Live operational monitoring with timestamps and auto-refresh.');
+    expect(adminSource).toContain('Admin command palette');
+    expect(adminSource).toContain("event.key.toLowerCase() === 'k'");
+    expect(adminSource).toContain('Preview before sending');
+    expect(adminSource).toContain('runAdminAction');
+    expect(adminSource).toContain('executePortalAdminAction(action');
+    expect(adminSource).not.toContain('setDoc(');
+    expect(adminSource).not.toContain('updateDoc(');
+    expect(service).toContain('moderationReports');
+    expect(service).toContain('verificationRequests');
+    expect(service).toContain('broadcastNotifications');
+    expect(service).toContain('systemHealth');
   });
 });

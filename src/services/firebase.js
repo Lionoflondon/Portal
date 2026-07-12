@@ -547,6 +547,30 @@ export function reclaimPortalHandle(payload) { return callPortalIdentity('reclai
 export function refundPlaceholderPortalHandlePurchase(purchaseId) { return callPortalIdentity('refundPlaceholderHandlePurchase', { purchaseId }); }
 export function requestPaidPortalHandleReview(handle, paymentReference, riskSignals = {}) { return callPortalIdentity('requestPaidHandleReview', { handle, paymentReference, riskSignals }); }
 export function reviewPortalHandleRequest(payload) { return callPortalIdentity('reviewHandleRequest', payload); }
+export function executePortalAdminAction(action, payload = {}) { return callPortalIdentity('executePortalAdminAction', { action, ...payload }); }
+
+const adminCollectionConfig = {
+  moderationReports: ['moderationReports', 'createdAt'],
+  reports: ['reports', 'createdAt'],
+  users: ['users', 'updatedAt'],
+  handles: ['handles', 'updatedAt'],
+  handleListings: ['handleListings', 'updatedAt'],
+  handleTransfers: ['handleTransfers', 'createdAt'],
+  handleDisputes: ['handleDisputes', 'updatedAt'],
+  events: ['events', 'updatedAt'],
+  analyticsDaily: ['analyticsDaily', 'date'],
+  systemHealth: ['systemHealth', 'updatedAt'],
+  auditLogs: ['auditLogs', 'createdAt'],
+  verificationRequests: ['verificationRequests', 'createdAt'],
+  broadcastNotifications: ['broadcastNotifications', 'createdAt'],
+};
+
+export function observePortalAdminCollection(key, callback, onError, max = 50) {
+  const config = adminCollectionConfig[key];
+  if (!config) throw new Error(`Unknown Portal Admin collection: ${key}`);
+  const [path, orderField] = config;
+  return onSnapshot(query(collection(requireService(portalDb, 'Firestore'), path), orderBy(orderField, 'desc'), limit(max)), callback, onError);
+}
 
 export function observeHandlePurchases(uid, callback, onError) {
   return onSnapshot(

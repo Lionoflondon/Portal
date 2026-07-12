@@ -900,6 +900,36 @@ function requireElevatedPortalAdmin(request, category) {
   return uid;
 }
 
+export const executePortalAdminAction = onCall(async (request) => {
+  const adminUid = requirePortalAdmin(request);
+  const action = String(request.data?.action || '').trim();
+  const entityType = String(request.data?.entityType || 'admin').trim();
+  const targetId = request.data?.targetId ? String(request.data.targetId) : null;
+  const reason = String(request.data?.reason || 'admin_action').trim();
+  if (!action || action.length > 80) throw new HttpsError('invalid-argument', 'A valid admin action is required.');
+  if (entityType.length > 80) throw new HttpsError('invalid-argument', 'A valid entity type is required.');
+  const auditRef = db.collection('auditLogs').doc();
+  const timelineRef = db.collection('adminActionTimeline').doc();
+  const payload = {
+    adminUid,
+    action,
+    entityType,
+    targetId,
+    reason,
+    oldValue: request.data?.oldValue ?? null,
+    newValue: request.data?.newValue ?? null,
+    ip: request.rawRequest?.ip || null,
+    device: request.rawRequest?.headers?.['user-agent'] || null,
+    immutable: true,
+    createdAt: FieldValue.serverTimestamp(),
+  };
+  await db.runTransaction(async (transaction) => {
+    transaction.set(auditRef, { ...payload, auditId: auditRef.id, system: 'portal_admin_v3' });
+    transaction.set(timelineRef, { ...payload, timelineId: timelineRef.id, status: 'recorded' });
+  });
+  return { ok: true, auditId: auditRef.id, timelineId: timelineRef.id };
+});
+
 export const getAdminHandleRecord = onCall(async (request) => {
   requirePortalAdmin(request);
   const normalizedHandle = normalizeHandle(request.data?.handle || '');
