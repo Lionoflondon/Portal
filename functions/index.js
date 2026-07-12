@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { Buffer } from 'node:buffer';
+import { createHash, randomUUID } from 'node:crypto';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -664,6 +665,108 @@ function requireAuth(request) {
   return request.auth.uid;
 }
 
+const ADMIN_ROLE_PERMISSIONS = {
+  super_admin: ['*'],
+  trust_safety: ['suspend_user', 'ban_user', 'restore_content', 'permanent_delete', 'quick_approve', 'quick_remove', 'quick_suspend', 'bulk_moderation', 'view_audit_logs', 'export_reports', 'restore_deleted_content', 'restore_suspended_users'],
+  verification_team: ['approve_verification', 'remove_verification', 'request_documents', 'view_audit_logs', 'export_reports'],
+  marketplace_team: ['transfer_handle', 'recover_handle', 'marketplace_reversal', 'refund_placeholder_purchase', 'view_audit_logs', 'export_reports', 'restore_handles'],
+  events_team: ['delete_event', 'feature_event', 'archive', 'feature', 'remove', 'merge_duplicate_events', 'split_merged_events', 'view_audit_logs', 'export_reports'],
+  creator_team: ['large_creator_payout_approval', 'view_audit_logs', 'export_reports'],
+  support: ['warn_user', 'force_logout', 'message_user', 'view_reports', 'view_audit_logs'],
+  analytics: ['view_analytics', 'export_reports', 'view_audit_logs'],
+  finance: ['marketplace_reversal', 'large_creator_payout_approval', 'export_reports', 'view_audit_logs'],
+  read_only_auditor: ['view_audit_logs', 'export_reports'],
+};
+
+const ACTION_PERMISSION = {
+  suspend: 'suspend_user',
+  suspend_account: 'suspend_user',
+  quick_suspend: 'suspend_user',
+  ban: 'ban_user',
+  approve: 'restore_content',
+  restore: 'restore_content',
+  restore_content: 'restore_content',
+  permanent_delete: 'permanent_delete',
+  approve_verification: 'approve_verification',
+  remove_verification: 'remove_verification',
+  request_documents: 'request_documents',
+  transfer: 'transfer_handle',
+  transfer_handle: 'transfer_handle',
+  recover: 'recover_handle',
+  recover_handle: 'recover_handle',
+  announcement: 'broadcast_notification',
+  maintenance: 'broadcast_notification',
+  security: 'broadcast_notification',
+  emergency: 'broadcast_notification',
+  feature_rollout: 'broadcast_notification',
+  delete_event: 'delete_event',
+  feature_event: 'feature_event',
+  feature: 'feature_event',
+  view_audit_history: 'view_audit_logs',
+  export: 'export_reports',
+  csv_export: 'export_reports',
+  json_export: 'export_reports',
+  manage_roles: 'manage_roles',
+  marketplace_reversal: 'marketplace_reversal',
+  large_creator_payout_approval: 'large_creator_payout_approval',
+  restore_deleted_content: 'restore_deleted_content',
+  restore_suspended_users: 'restore_suspended_users',
+  restore_handles: 'restore_handles',
+};
+
+const SENSITIVE_ADMIN_ACTIONS = new Set([
+  'ban',
+  'permanent_delete',
+  'protected_handle_transfer',
+  'government_handle_change',
+  'remove_verification',
+  'announcement',
+  'emergency',
+  'marketplace_reversal',
+  'large_creator_payout_approval',
+]);
+
+function adminRoles(request) {
+  const token = request.auth?.token || {};
+  const raw = token.portalAdminRoles || token.portalAdminRole || (token.portalHandleSuperAdmin ? ['super_admin'] : []);
+  const roles = Array.isArray(raw) ? raw : [raw];
+  if (token.portalAdmin === true && roles.length === 0) roles.push('support');
+  return roles.map((role) => String(role || '').trim().toLowerCase().replaceAll(' ', '_')).filter(Boolean);
+}
+
+function permissionForAction(action) {
+  return ACTION_PERMISSION[action] || action;
+}
+
+function hasAdminPermission(request, permission) {
+  const roles = adminRoles(request);
+  return roles.some((role) => {
+    const permissions = ADMIN_ROLE_PERMISSIONS[role] || [];
+    return permissions.includes('*') || permissions.includes(permission);
+  });
+}
+
+function requireAdminPermission(request, permission) {
+  const uid = requirePortalAdmin(request);
+  if (!hasAdminPermission(request, permission)) throw new HttpsError('permission-denied', `Portal Admin permission required: ${permission}.`);
+  return uid;
+}
+
+function adminCorrelationId(request) {
+  const raw = JSON.stringify({ uid: request.auth?.uid || '', action: request.data?.action || '', targetId: request.data?.targetId || '', nonce: request.data?.idempotencyKey || randomUUID() });
+  return createHash('sha256').update(raw).digest('hex').slice(0, 24);
+}
+
+function sanitizeAdminInput(value, depth = 0) {
+  if (depth > 4) return '[truncated]';
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') return value.replace(/[<>]/g, '').slice(0, 2000);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => sanitizeAdminInput(item, depth + 1));
+  if (typeof value === 'object') return Object.fromEntries(Object.entries(value).slice(0, 50).map(([key, item]) => [String(key).slice(0, 80), sanitizeAdminInput(item, depth + 1)]));
+  return String(value).slice(0, 2000);
+}
+
 async function handleAvailability(value) {
   const validation = validateHandle(value);
   if (!validation.valid) return { available: false, state: validation.state || 'invalid', reason: validation.reason };
@@ -901,37 +1004,70 @@ function requireElevatedPortalAdmin(request, category) {
 }
 
 export const executePortalAdminAction = onCall(async (request) => {
-  const adminUid = requirePortalAdmin(request);
-  const action = String(request.data?.action || '').trim();
+  const action = String(request.data?.action || '').trim().toLowerCase().replaceAll(' ', '_').slice(0, 80);
+  const permission = permissionForAction(action);
+  const adminUid = requireAdminPermission(request, permission);
   const entityType = String(request.data?.entityType || 'admin').trim();
   const targetId = request.data?.targetId ? String(request.data.targetId) : null;
-  const reason = String(request.data?.reason || 'admin_action').trim();
+  const reason = String(request.data?.reason || '').trim();
+  const idempotencyKey = String(request.data?.idempotencyKey || '').trim().slice(0, 120);
+  const approvalId = request.data?.approvalId ? String(request.data.approvalId).trim() : null;
   if (!action || action.length > 80) throw new HttpsError('invalid-argument', 'A valid admin action is required.');
   if (entityType.length > 80) throw new HttpsError('invalid-argument', 'A valid entity type is required.');
+  if (!reason || reason.length < 4) throw new HttpsError('invalid-argument', 'A reason is required for privileged admin actions.');
+  if (!idempotencyKey || idempotencyKey.length < 8) throw new HttpsError('invalid-argument', 'An idempotency key is required.');
+  const correlationId = adminCorrelationId(request);
+  const idemRef = db.collection('adminIdempotency').doc(`${adminUid}_${idempotencyKey}`);
+  const sessionRef = db.collection('adminSessions').doc(`${adminUid}_${correlationId}`);
   const auditRef = db.collection('auditLogs').doc();
   const timelineRef = db.collection('adminActionTimeline').doc();
+  const approvalRef = db.collection('adminApprovals').doc(approvalId || auditRef.id);
+  const rateRef = db.collection('adminRateLimits').doc(`${adminUid}_${action}`);
+  const now = Date.now();
+  const sensitive = SENSITIVE_ADMIN_ACTIONS.has(action) || request.data?.sensitive === true;
+  const approvalStatus = sensitive && !approvalId ? 'pending_approval' : approvalId ? 'approved' : 'not_required';
   const payload = {
+    actionId: auditRef.id,
     adminUid,
+    actorUid: adminUid,
+    role: adminRoles(request),
     action,
     entityType,
     targetId,
     reason,
-    oldValue: request.data?.oldValue ?? null,
-    newValue: request.data?.newValue ?? null,
+    permission,
+    approvalStatus,
+    oldValue: sanitizeAdminInput(request.data?.oldValue ?? null),
+    newValue: sanitizeAdminInput(request.data?.newValue ?? null),
+    correlationId,
+    status: sensitive && !approvalId ? 'pending_approval' : 'recorded',
     ip: request.rawRequest?.ip || null,
     device: request.rawRequest?.headers?.['user-agent'] || null,
     immutable: true,
     createdAt: FieldValue.serverTimestamp(),
   };
+  const existing = await idemRef.get();
+  if (existing.exists) return existing.data().result || { ok: true, duplicate: true };
+  const recent = await rateRef.get();
+  const recentAt = recent.data()?.updatedAt?.toMillis?.() || 0;
+  if (now - recentAt < 1000) throw new HttpsError('resource-exhausted', 'Slow down before repeating that admin action.');
   await db.runTransaction(async (transaction) => {
-    transaction.set(auditRef, { ...payload, auditId: auditRef.id, system: 'portal_admin_v3' });
-    transaction.set(timelineRef, { ...payload, timelineId: timelineRef.id, status: 'recorded' });
+    if (approvalId) {
+      transaction.set(approvalRef, { approvalId, action, entityType, targetId, approvedByUid: adminUid, status: 'approved', reason, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    } else if (sensitive) {
+      transaction.set(approvalRef, { approvalId: approvalRef.id, action, entityType, targetId, requestedByUid: adminUid, reason, approvalHistory: [{ status: 'requested', adminUid, at: new Date().toISOString() }], status: 'pending', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    }
+    transaction.set(sessionRef, { adminUid, lastActionAt: FieldValue.serverTimestamp(), lastLogin: request.auth?.token?.auth_time ? new Date(request.auth.token.auth_time * 1000) : null, ip: payload.ip, device: payload.device, location: request.data?.location || null, sessionExpiry: new Date(Date.now() + 60 * 60 * 1000), forceLogoutAvailable: true }, { merge: true });
+    transaction.set(rateRef, { adminUid, action, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.set(auditRef, { ...payload, auditId: auditRef.id, system: 'portal_admin_v4', csrfChecked: true });
+    transaction.set(timelineRef, { ...payload, timelineId: timelineRef.id });
+    transaction.set(idemRef, { adminUid, idempotencyKey, action, result: { ok: true, auditId: auditRef.id, timelineId: timelineRef.id, approvalId: sensitive ? approvalRef.id : null, approvalStatus }, createdAt: FieldValue.serverTimestamp() });
   });
-  return { ok: true, auditId: auditRef.id, timelineId: timelineRef.id };
+  return { ok: true, auditId: auditRef.id, timelineId: timelineRef.id, approvalId: sensitive ? approvalRef.id : null, approvalStatus };
 });
 
 export const getAdminHandleRecord = onCall(async (request) => {
-  requirePortalAdmin(request);
+  requireAdminPermission(request, 'view_audit_logs');
   const normalizedHandle = normalizeHandle(request.data?.handle || '');
   if (!normalizedHandle) throw new HttpsError('invalid-argument', 'Enter a handle to search.');
   const [handle, reserved, protectedHandle, policy, listings, requests, purchases] = await Promise.all([
@@ -943,7 +1079,7 @@ export const getAdminHandleRecord = onCall(async (request) => {
 });
 
 export const refundPlaceholderHandlePurchase = onCall(async (request) => {
-  const adminUid = requirePortalAdmin(request);
+  const adminUid = requireAdminPermission(request, 'marketplace_reversal');
   const purchaseId = String(request.data?.purchaseId || '');
   if (!purchaseId) throw new HttpsError('invalid-argument', 'Choose a purchase to refund.');
   const purchaseRef = db.collection('handlePurchases').doc(purchaseId);
@@ -1001,9 +1137,10 @@ export const requestPaidHandleReview = onCall(async (request) => {
 });
 
 export const reviewHandleRequest = onCall(async (request) => {
-  const adminUid = requirePortalAdmin(request);
+  const reviewAction = String(request.data?.action || '');
+  const adminUid = requireAdminPermission(request, reviewAction === 'approve' ? 'approve_verification' : reviewAction === 'refund' ? 'marketplace_reversal' : reviewAction === 'protect_handle' ? 'recover_handle' : 'view_audit_logs');
   const requestId = String(request.data?.requestId || '');
-  const action = String(request.data?.action || '');
+  const action = reviewAction;
   const notes = String(request.data?.notes || '').trim();
   const alternativeHandle = request.data?.alternativeHandle ? normalizeHandle(request.data.alternativeHandle) : null;
   if (!requestId || !['approve', 'reject', 'refund', 'offer_alternative', 'request_id', 'suspend_review', 'rescind_issued_handle', 'protect_handle'].includes(action)) throw new HttpsError('invalid-argument', 'Choose a review request and valid action.');
@@ -1100,7 +1237,7 @@ export const reclaimPortalHandle = onCall(async (request) => {
 });
 
 export const managePortalHandleRegistry = onCall(async (request) => {
-  const adminUid = requirePortalAdmin(request);
+  const adminUid = requireAdminPermission(request, ['verify_owner', 'reserve', 'protect'].includes(request.data?.action) ? 'transfer_handle' : 'recover_handle');
   const normalizedHandle = normalizeHandle(request.data?.handle || '');
   const action = request.data?.action;
   const category = String(request.data?.category || 'marketplace');
@@ -1307,7 +1444,7 @@ export const openHandleDispute = onCall(async (request) => {
 });
 
 export const completeHandleTransfer = onCall(async (request) => {
-  const adminUid = requirePortalAdmin(request); const listingId = normalizeHandle(request.data?.listingId || ''); const listingRef = db.collection('handleListings').doc(listingId); const handleRef = db.collection('handles').doc(listingId);
+  const adminUid = requireAdminPermission(request, 'transfer_handle'); const listingId = normalizeHandle(request.data?.listingId || ''); const listingRef = db.collection('handleListings').doc(listingId); const handleRef = db.collection('handles').doc(listingId);
   await db.runTransaction(async (transaction) => { const [listingSnapshot, handleSnapshot] = await Promise.all([transaction.get(listingRef), transaction.get(handleRef)]); if (!listingSnapshot.exists || !handleSnapshot.exists) throw new HttpsError('not-found', 'Listing or handle not found.'); const listing = listingSnapshot.data(); const handle = handleSnapshot.data(); const transferState = { status: listing.settlementStatus === 'confirmed' ? 'settlement_confirmed' : '', paymentConfirmed: listing.paymentStatus === 'confirmed', sellerProceedsAssigned: listing.ownershipType === 'portal_owned' || listing.settlementStatus === 'proceeds_assigned', disputeState: listing.disputeState }; if (!mayTransfer(transferState) || (handle.ownerUid || handle.uid) !== listing.sellerUid || handle.saleEligible === false || listing.disputeState) throw new HttpsError('failed-precondition', 'Trusted settlement is required before transfer.'); const transferRef = db.collection('handleTransfers').doc(); const transactionRef = db.collection('handleTransactions').doc(); transaction.update(handleRef, { ownerUid: listing.buyerUid, uid: listing.buyerUid, previousOwnerUid: listing.sellerUid, status: 'transferred', marketplaceClass: 'user_owned', currentListingId: null, lastTransferredAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }); transaction.update(listingRef, { listingStatus: 'transferred', transferStatus: 'completed', updatedAt: FieldValue.serverTimestamp() }); transaction.set(transferRef, { transferId: transferRef.id, listingId, handleId: listingId, sellerUid: listing.sellerUid, buyerUid: listing.buyerUid, createdAt: FieldValue.serverTimestamp() }); transaction.set(transactionRef, { transactionId: transactionRef.id, listingId, grossSaleAmount: listing.grossSaleAmount, portalCommissionAmount: listing.portalCommissionAmount, sellerProceedsAmount: listing.sellerProceedsAmount, createdAt: FieldValue.serverTimestamp() }); });
   await writeAudit('transfer_completed', adminUid, { listingId }); return { transferred: true };
 });

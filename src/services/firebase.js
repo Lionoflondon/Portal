@@ -547,7 +547,10 @@ export function reclaimPortalHandle(payload) { return callPortalIdentity('reclai
 export function refundPlaceholderPortalHandlePurchase(purchaseId) { return callPortalIdentity('refundPlaceholderHandlePurchase', { purchaseId }); }
 export function requestPaidPortalHandleReview(handle, paymentReference, riskSignals = {}) { return callPortalIdentity('requestPaidHandleReview', { handle, paymentReference, riskSignals }); }
 export function reviewPortalHandleRequest(payload) { return callPortalIdentity('reviewHandleRequest', payload); }
-export function executePortalAdminAction(action, payload = {}) { return callPortalIdentity('executePortalAdminAction', { action, ...payload }); }
+export function executePortalAdminAction(action, payload = {}) {
+  const idempotencyKey = payload.idempotencyKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`);
+  return callPortalIdentity('executePortalAdminAction', { action, idempotencyKey, ...payload });
+}
 
 const adminCollectionConfig = {
   moderationReports: ['moderationReports', 'createdAt'],
@@ -561,6 +564,11 @@ const adminCollectionConfig = {
   analyticsDaily: ['analyticsDaily', 'date'],
   systemHealth: ['systemHealth', 'updatedAt'],
   auditLogs: ['auditLogs', 'createdAt'],
+  adminApprovals: ['adminApprovals', 'updatedAt'],
+  adminSessions: ['adminSessions', 'lastActionAt'],
+  adminActionTimeline: ['adminActionTimeline', 'createdAt'],
+  recoveryQueue: ['recoveryQueue', 'createdAt'],
+  adminExports: ['adminExports', 'createdAt'],
   verificationRequests: ['verificationRequests', 'createdAt'],
   broadcastNotifications: ['broadcastNotifications', 'createdAt'],
 };
