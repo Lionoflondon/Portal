@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { eventStatuses, routes, secondaryRoutes, sourceTypes } from '../domain/portal.js';
+import { ActionIcon, Icon } from './icons.jsx';
 import {
   archivePortalEvent,
   changePortalHandle,
@@ -69,23 +70,6 @@ import {
   uploadPortalProfilePhoto,
 } from '../services/firebase.js';
 
-const iconPaths = {
-  home: '<path d="M4 10.8 12 4l8 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 10v9.2h11V10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 19v-5h4v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-  events: '<path d="M3 12h4l2-5 4 10 2-5h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-  vortex: '<circle cx="12" cy="12" r="8.2" stroke="currentColor" stroke-width="2"/><path d="M12 3.8a8.2 8.2 0 0 1 7.1 12.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 20.2a8.2 8.2 0 0 1-7.1-12.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.4" stroke="currentColor" stroke-width="2"/>',
-  messages: '<path d="M5.2 6.5h13.6a2.7 2.7 0 0 1 2.7 2.7v5.8a2.7 2.7 0 0 1-2.7 2.7h-6.3L7 21v-3.3H5.2A2.7 2.7 0 0 1 2.5 15V9.2a2.7 2.7 0 0 1 2.7-2.7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-  notifications: '<path d="M18 10.2a6 6 0 0 0-12 0c0 4.8-2 6.7-2 6.7h16s-2-1.9-2-6.7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.2 20a2.4 2.4 0 0 1-4.4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-  profile: '<rect x="3.5" y="5" width="17" height="14" rx="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="11" r="2.2" stroke="currentColor" stroke-width="2"/><path d="M13.5 10h3.8M13.5 14h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6.5 16.2c.7-1.3 1.5-1.9 2.5-1.9s1.8.6 2.5 1.9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-  settings: '<circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
-  premium: '<path d="M5 18h14l1.5-9-5 3-3.5-6-3.5 6-5-3L5 18z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
-  creator: '<path d="M4 19V6a2 2 0 012-2h9l5 5v10a2 2 0 01-2 2H6a2 2 0 01-2-2z" stroke="currentColor" stroke-width="1.8"/><path d="M8 13l2.5 2.5L16 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
-  brand: '<path d="M12 3.5 19.5 7v5.2c0 4.8-3.1 7.4-7.5 8.3-4.4-.9-7.5-3.5-7.5-8.3V7L12 3.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.2 12.2 11.2 14l3.8-4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-  custodians: '<path d="m12 4 2.35 4.75 5.25.76-3.8 3.7.9 5.23L12 16l-4.7 2.44.9-5.23-3.8-3.7 5.25-.76L12 4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-  create: '<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-  search: '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
-};
-
-function Icon({ name }) { return <svg className={name === 'vortex' ? 'vortex-icon' : undefined} viewBox="0 0 24 24" fill="none" aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconPaths[name] || '' }} />; }
 function initials(name = '') { return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'P'; }
 function Avatar({ children, size = 'md' }) { return <span className={`avatar size-${size}`}>{children}</span>; }
 function timeLabel(value) { return value?.toDate ? value.toDate().toLocaleDateString() : 'Now'; }
@@ -155,15 +139,6 @@ function EventCollection({ events, loading, error, empty, onFollow, following = 
 function PostMedia({ post }) {
   const photos = post.photos || [];
   return <>{photos.length ? <div className={`post-photo-grid count-${Math.min(photos.length, 4)}`}>{photos.map((photo, index) => <img src={photo.url} alt={`Post media ${index + 1}`} key={photo.url || index} loading="lazy" />)}</div> : null}{post.video?.url ? <video className="post-video" src={post.video.url} poster={post.video.thumbnailUrl || undefined} controls preload="metadata" /> : null}{post.link?.url ? <a className="glass card embedded-post" href={post.link.url} target="_blank" rel="noreferrer"><strong>{post.link.title || 'Attached link'}</strong><p>{post.link.url}</p></a> : null}{post.poll?.options?.length ? <div className="glass card poll-card"><strong>{post.poll.question || 'Poll'}</strong>{post.poll.options.map((option) => <span className="poll-option" key={option.id || option.text}>{option.text}</span>)}</div> : null}{post.topics?.length ? <div className="topic-row">{post.topics.map((topic) => <span className="source-chip" key={topic}>#{topic}</span>)}</div> : null}{post.location ? <span className="source-chip">Location: {post.location}</span> : null}</>;
-}
-
-function ActionIcon({ name, filled = false }) {
-  const common = { viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': 'true' };
-  if (name === 'like') return <svg {...common}>{filled ? <path d="M12 21s-7-4.35-9.2-9.3C1.4 8.45 3.45 5.2 6.8 5.2c1.95 0 3.35 1.05 4.2 2.25.85-1.2 2.25-2.25 4.2-2.25 3.35 0 5.4 3.25 4 6.5C19 16.65 12 21 12 21z" fill="currentColor" /> : <path d="M12 20.5s-7.25-4.48-9.05-9.1C1.7 8.18 3.68 5.25 6.75 5.25c1.78 0 3.25 1 4.03 2.38.14.25.3.37.47.37s.33-.12.47-.37c.78-1.38 2.25-2.38 4.03-2.38 3.07 0 5.05 2.93 3.8 6.15C17.75 16.02 12 20.5 12 20.5z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />}</svg>;
-  if (name === 'reply') return <svg {...common}><path d="M20 17.5c-1.7-3.4-4.8-5.2-9.2-5.2H7.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M10.4 7.6 5.2 12l5.2 4.4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  if (name === 'echo') return <svg {...common}><path d="M7 7h8.2c2.1 0 3.8 1.7 3.8 3.8v.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><path d="m15.7 3.8 3.5 3.2-3.5 3.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M17 17H8.8C6.7 17 5 15.3 5 13.2v-.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><path d="m8.3 20.2-3.5-3.2 3.5-3.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  if (name === 'bookmark') return <svg {...common}>{filled ? <path d="M7 4.8c0-.8.65-1.45 1.45-1.45h7.1c.8 0 1.45.65 1.45 1.45v15.1l-5-3.05-5 3.05V4.8z" fill="currentColor" /> : <path d="M7 4.8c0-.8.65-1.45 1.45-1.45h7.1c.8 0 1.45.65 1.45 1.45v15.1l-5-3.05-5 3.05V4.8z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />}</svg>;
-  return <svg {...common}><path d="M12 16V4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><path d="m7.5 8.5 4.5-4.5 4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /><path d="M5 14v3.8c0 .9.7 1.6 1.6 1.6h10.8c.9 0 1.6-.7 1.6-1.6V14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
 }
 
 function PostCard({ post, echoed, liked, bookmarked, onEcho = () => {}, onQuote = () => {}, onLike = () => {}, onBookmark = () => {}, onReply = () => {} }) {

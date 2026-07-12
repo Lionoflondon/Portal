@@ -26,16 +26,18 @@ describe('Portal app shell', () => {
 
   it('uses the Portal teal navigation icon and primary action system', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const icons = readFileSync(resolve('src/ui/icons.jsx'), 'utf8');
     const styles = readFileSync(resolve('src/styles.css'), 'utf8');
-    expect(source).toContain("home: '<path d=\"M4 10.8 12 4l8 6.8\"");
-    expect(source).toContain("events: '<path d=\"M3 12h4l2-5 4 10 2-5h6\"");
-    expect(source).toContain("messages: '<path d=\"M5.2 6.5h13.6");
-    expect(source).toContain("notifications: '<path d=\"M18 10.2a6 6 0 0 0-12 0");
-    expect(source).toContain("profile: '<rect x=\"3.5\" y=\"5\" width=\"17\" height=\"14\"");
-    expect(source).toContain("brand: '<path d=\"M12 3.5 19.5 7v5.2");
-    expect(source).toContain("custodians: '<path d=\"m12 4 2.35 4.75");
-    expect(source).toContain("create: '<path d=\"M12 5v14M5 12h14\"");
-    expect(source).toContain("className={name === 'vortex' ? 'vortex-icon' : undefined}");
+    expect(source).toContain("import { ActionIcon, Icon } from './icons.jsx';");
+    expect(icons).toContain("home: '<path d=\"M4 10.8 12 4l8 6.8\"");
+    expect(icons).toContain("events: '<path d=\"M3 12h4l2-5 4 10 2-5h6\"");
+    expect(icons).toContain("messages: '<path d=\"M5.2 6.5h13.6");
+    expect(icons).toContain("notifications: '<path d=\"M18 10.2a6 6 0 0 0-12 0");
+    expect(icons).toContain("profile: '<rect x=\"3.5\" y=\"5\" width=\"17\" height=\"14\"");
+    expect(icons).toContain("brand: '<path d=\"M12 3.5 19.5 7v5.2");
+    expect(icons).toContain("custodians: '<path d=\"m12 4 2.35 4.75");
+    expect(icons).toContain("create: '<path d=\"M12 5v14M5 12h14\"");
+    expect(icons).toContain("className={name === 'vortex' ? 'vortex-icon' : undefined}");
     expect(source).toContain('<Icon name="create" />Create');
     expect(styles).toContain('--accent:#63D6F2');
     expect(styles).toContain('--nav-inactive:#7E8798');
@@ -128,13 +130,13 @@ describe('Portal app shell', () => {
 
   it('uses a premium SVG feed interaction bar with Echo copy only in the menu', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const icons = readFileSync(resolve('src/ui/icons.jsx'), 'utf8');
     const postCardBlock = source.match(/function PostCard\([\s\S]*?\n}\n\nfunction Home/)?.[0] || '';
-    const actionIconBlock = source.match(/function ActionIcon\([\s\S]*?\n}\n\nfunction PostCard/)?.[0] || '';
     expect(postCardBlock).toContain('interaction-bar');
-    expect(actionIconBlock).toContain("name === 'like'");
-    expect(actionIconBlock).toContain("name === 'reply'");
-    expect(actionIconBlock).toContain("name === 'echo'");
-    expect(actionIconBlock).toContain("name === 'bookmark'");
+    expect(icons).toContain("name === 'like'");
+    expect(icons).toContain("name === 'reply'");
+    expect(icons).toContain("name === 'echo'");
+    expect(icons).toContain("name === 'bookmark'");
     expect(postCardBlock).toContain('<ActionIcon name="share" />');
     expect(postCardBlock).toContain('interaction-label');
     expect(postCardBlock).toContain('interaction-count');
