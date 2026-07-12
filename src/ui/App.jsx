@@ -112,6 +112,18 @@ function deviceType() {
   if (!coarse) return 'desktop';
   return window.innerWidth >= 768 ? 'tablet' : 'mobile';
 }
+function useIsMobileLayout() {
+  const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const query = window.matchMedia('(max-width: 767px)');
+    const update = () => setMobile(query.matches);
+    update();
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, []);
+  return mobile;
+}
 function cleanHandle(value = '') { return String(value || '').replace(/^@/, '').trim().toLowerCase(); }
 function publicProfileRoute(handle = '') { const normalized = cleanHandle(handle); return normalized ? `#/@${normalized}` : '#/profile'; }
 function publicProfileUrl(handle = '') { const normalized = cleanHandle(handle); return normalized ? `${window.location.origin}/@${normalized}` : `${window.location.origin}/#/profile`; }
@@ -474,9 +486,13 @@ function HandleIdentity({ profile }) {
 function ProfileSetup({ user, profile }) {
   const [values, setValues] = useState({ displayName: profile?.displayName || user.displayName || '', handle: '', bio: profile?.bio || '', location: profile?.location || '', website: profile?.website || '' });
   const [photo, setPhoto] = useState(null); const [availability, setAvailability] = useState(''); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [progress, setProgress] = useState(0);
+  const isMobile = useIsMobileLayout();
+  const photoPreview = useMemo(() => (photo ? URL.createObjectURL(photo) : ''), [photo]);
+  useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview); }, [photoPreview]);
   useEffect(() => { const handle = values.handle.trim(); if (!handle) { setAvailability(''); return undefined; } setAvailability('Checking'); const timer = window.setTimeout(async () => { try { const result = await checkPortalHandle(handle); setAvailability(result.available ? 'Available' : ({ taken: 'Already taken', reserved: 'Reserved', protected: 'Protected', invalid: 'Invalid' }[result.state] || 'Already taken')); } catch { setAvailability('Temporarily unavailable'); } }, 400); return () => window.clearTimeout(timer); }, [values.handle]);
   function update(field, value) { setValues((current) => ({ ...current, [field]: value })); }
   function selectPhoto(file) { if (!file) { setPhoto(null); return; } if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) { setError('Choose an image file up to 10 MB.'); return; } setError(''); setPhoto(file); }
+  function expandBio(event) { event.currentTarget.style.height = 'auto'; event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`; }
   async function createProfile(event) {
     event.preventDefault(); if (busy) return;
     if (!values.displayName.trim()) { setError('Display name is required.'); return; }
@@ -493,6 +509,7 @@ function ProfileSetup({ user, profile }) {
     } finally { setBusy(false); }
   }
   const blocked = busy || !values.handle.trim() || !values.displayName.trim() || availability !== 'Available';
+  if (isMobile) return <div className="page mobile-profile-setup"><form className="mobile-profile-form glass" onSubmit={createProfile}><header className="mobile-profile-head"><span className="eyebrow">Portal profile</span><h1 className="display-lg">Create your Profile</h1><p className="body-sm">Choose how Portal remembers and introduces you.</p></header><div className="mobile-avatar-row"><button className="mobile-avatar-picker" type="button" onClick={() => document.getElementById('mobile-profile-photo-picker')?.click()} aria-label="Choose profile photo">{photoPreview ? <img src={photoPreview} alt="" /> : <Avatar size="lg">{initials(values.displayName || user.displayName)}</Avatar>}<span>Change photo</span></button><input id="mobile-profile-photo-picker" className="mobile-hidden-file" type="file" accept="image/*" onChange={(event) => selectPhoto(event.target.files?.[0])} />{photo ? <p className="body-sm">{photo.name}{progress ? ` · Upload ${progress}%` : ''}</p> : null}</div><div className="mobile-profile-fields"><label>Display name<input value={values.displayName} onChange={(event) => update('displayName', event.target.value)} required maxLength="80" /></label><label>Handle<div className="handle-input"><span aria-hidden="true">@</span><input value={values.handle} onChange={(event) => update('handle', event.target.value.replace(/^@/, ''))} placeholder={PROFILE_HANDLE_PLACEHOLDER} required minLength="3" maxLength="24" autoCapitalize="none" autoCorrect="off" /></div></label>{availability ? <p className={availability === 'Available' ? 'form-notice' : availability === 'Checking' ? 'form-status' : 'form-error'} role="status">{availability}</p> : null}<label>Bio<textarea value={values.bio} onChange={(event) => update('bio', event.target.value)} onInput={expandBio} rows="3" maxLength="240" /></label><label>Location<input value={values.location} onChange={(event) => update('location', event.target.value)} maxLength="120" /></label><label>Website<input value={values.website} onChange={(event) => update('website', event.target.value)} type="url" placeholder="https://" maxLength="200" /></label></div>{error ? <p className="form-error" role="alert">{error}</p> : null}{message ? <p className="form-notice" role="status">{message}</p> : null}<div className="mobile-profile-save"><button className="btn btn-primary" disabled={blocked}>{busy ? 'Creating profile...' : 'Create Profile'}</button></div></form></div>;
   return <div className="page profile-setup"><div><h1 className="display-xl">Create your Profile</h1><p className="body-md">Choose how Portal remembers and introduces you.</p></div><section className="glass card"><form className="form-stack" onSubmit={createProfile}><label>Profile photo <input type="file" accept="image/*" onChange={(event) => selectPhoto(event.target.files?.[0])} /></label>{photo ? <p className="body-sm">{photo.name}{progress ? ` · Upload ${progress}%` : ''}</p> : null}<label>Display name<input value={values.displayName} onChange={(event) => update('displayName', event.target.value)} required maxLength="80" /></label><label>Handle<div className="handle-input"><span aria-hidden="true">@</span><input value={values.handle} onChange={(event) => update('handle', event.target.value.replace(/^@/, ''))} placeholder={PROFILE_HANDLE_PLACEHOLDER} required minLength="3" maxLength="24" autoCapitalize="none" autoCorrect="off" /></div></label>{availability ? <p className={availability === 'Available' ? 'form-notice' : availability === 'Checking' ? 'form-status' : 'form-error'} role="status">{availability}</p> : null}<label>Bio <textarea value={values.bio} onChange={(event) => update('bio', event.target.value)} maxLength="240" /></label><label>Location <input value={values.location} onChange={(event) => update('location', event.target.value)} maxLength="120" /></label><label>Website <input value={values.website} onChange={(event) => update('website', event.target.value)} type="url" placeholder="https://" maxLength="200" /></label>{error ? <p className="form-error" role="alert">{error}</p> : null}{message ? <p className="form-notice" role="status">{message}</p> : null}<div className="form-actions"><button className="btn btn-primary" disabled={blocked}>{busy ? 'Creating profile...' : 'Create Profile'}</button><button className="btn btn-secondary" type="button" disabled={blocked} onClick={createProfile}>Reserve Handle</button></div></form></section></div>;
 }
 

@@ -140,6 +140,29 @@ describe('Portal app shell', () => {
     expect(profileBlock).not.toContain('Search handles');
   });
 
+
+
+  it('renders a dedicated mobile Profile setup without desktop file controls', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const setupBlock = source.match(/function ProfileSetup\([\s\S]*?\n}\n\nfunction ProfileEditModal/)?.[0] || '';
+    const mobileBranch = setupBlock.match(/if \(isMobile\)[\s\S]*?return <div className="page profile-setup"/)?.[0] || '';
+    expect(setupBlock).toContain('useIsMobileLayout()');
+    expect(mobileBranch).toContain('mobile-profile-setup');
+    expect(mobileBranch).toContain('mobile-avatar-picker');
+    expect(mobileBranch).toContain('mobile-profile-photo-picker');
+    expect(mobileBranch).toContain('className="mobile-hidden-file"');
+    expect(mobileBranch).toContain('onInput={expandBio}');
+    expect(mobileBranch).toContain('role="status"');
+    expect(mobileBranch).not.toContain('Profile photo <input');
+    expect(styles).toContain('@media (max-width:767px)');
+    expect(styles).toContain('max-width:100vw;overflow-x:hidden');
+    expect(styles).toContain('env(safe-area-inset-bottom)');
+    expect(styles).toContain('.mobile-profile-save{position:sticky');
+    expect(styles).toContain('bottom:calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 12px)');
+    expect(styles).toContain('.mobile-profile-fields input,.mobile-profile-fields textarea{width:100%');
+  });
+
   it('polishes Publish Post into compact icon-driven panels', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const composerBlock = source.match(/function PostComposer\([\s\S]*?\n}\n\nfunction PostDetail/)?.[0] || '';

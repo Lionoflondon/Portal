@@ -67,3 +67,29 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}button
 .profile-live-preview{padding:0;overflow:hidden}.preview-cover{height:120px;border-radius:0;margin:0}.profile-preview-row{display:flex;gap:14px;align-items:flex-start;padding:0 18px 18px}.vortex-suggestions{display:grid;gap:14px}.vortex-suggestions .chip-row{margin-top:8px}@media (min-width:980px){.vortex-suggestions{grid-template-columns:repeat(3,minmax(0,1fr))}}@media (max-width:640px){.profile-preview-row{flex-direction:column}.preview-cover{height:96px}}
 .settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.settings-grid .card{display:flex;flex-direction:column;gap:12px}.settings-grid label{display:flex;flex-direction:column;gap:7px;color:var(--text-secondary);font-size:13px;font-weight:600}.settings-grid input,.settings-grid select{width:100%;border:1px solid var(--glass-border);border-radius:11px;background:rgba(255,255,255,.025);padding:11px 12px;outline:none;color:var(--text-primary);line-height:1.45}.settings-save-card{grid-column:1/-1}.settings-save-card .btn{align-self:flex-start}
 @media (max-width:900px){.settings-grid{grid-template-columns:1fr}.profile-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.event-card-details{grid-template-columns:1fr}.event-card-actions{grid-template-columns:1fr}.event-card-actions .btn{width:100%}}
+
+.mobile-profile-setup{display:none}
+@media (max-width:767px){
+  html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
+  .main-col{width:100%;max-width:100vw;overflow-x:hidden}
+  .content-col{width:100%;max-width:100vw;overflow-x:hidden;padding:calc(var(--topbar-h) + env(safe-area-inset-top) + 14px) 14px calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 96px)}
+  .bottom-nav{height:calc(var(--bottomnav-h) + env(safe-area-inset-bottom));padding:0 6px env(safe-area-inset-bottom)}
+  .mobile-profile-setup{display:flex;width:100%;max-width:100vw;min-height:calc(100vh - var(--topbar-h));padding:0 0 calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 18px);overflow-x:hidden}
+  .mobile-profile-form{position:relative;display:flex;flex-direction:column;gap:18px;width:100%;min-width:0;max-width:100%;padding:18px 16px calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 96px);overflow-x:hidden}
+  .mobile-profile-head{display:grid;gap:6px}
+  .mobile-profile-head .display-lg{font-size:30px}
+  .mobile-avatar-row{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+  .mobile-avatar-picker{display:inline-flex;align-items:center;gap:13px;max-width:100%;padding:8px 12px 8px 8px;border:1px solid var(--glass-border);border-radius:999px;background:rgba(255,255,255,.045);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);color:var(--text-primary);font-weight:700}
+  .mobile-avatar-picker img,.mobile-avatar-picker .avatar{width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.14);margin:0}
+  .mobile-avatar-picker span{font-size:13px;color:var(--accent)}
+  .mobile-hidden-file{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;clip:rect(0 0 0 0)!important}
+  .mobile-profile-fields{display:flex;flex-direction:column;gap:14px;width:100%;min-width:0}
+  .mobile-profile-fields label{display:flex;flex-direction:column;gap:7px;width:100%;min-width:0;color:var(--text-secondary);font-size:13px;font-weight:700}
+  .mobile-profile-fields input,.mobile-profile-fields textarea{width:100%;min-width:0;border:1px solid var(--glass-border);border-radius:13px;background:rgba(255,255,255,.032);padding:13px 14px;color:var(--text-primary);outline:none;line-height:1.45}
+  .mobile-profile-fields textarea{min-height:92px;max-height:260px;resize:none;overflow:hidden}
+  .mobile-profile-fields input:focus,.mobile-profile-fields textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,214,242,.14)}
+  .mobile-profile-fields .handle-input{width:100%;border-radius:13px;background:rgba(255,255,255,.032)}
+  .mobile-profile-fields .handle-input input{border:0;box-shadow:none;background:transparent;padding-left:4px}
+  .mobile-profile-save{position:sticky;bottom:calc(var(--bottomnav-h) + env(safe-area-inset-bottom) + 12px);z-index:12;padding:10px 0 0;background:linear-gradient(180deg,transparent,rgba(7,9,15,.92) 35%)}
+  .mobile-profile-save .btn{width:100%;min-height:48px}
+}
