@@ -254,4 +254,20 @@ describe('Portal Admin authentication', () => {
     expect(service).toContain('recoveryQueue');
     expect(service).toContain('adminExports');
   });
+
+  it('documents Admin V5 production readiness and launch blockers', () => {
+    const report = readFileSync(resolve('docs/admin-production-readiness.md'), 'utf8');
+    const script = readFileSync(resolve('scripts/admin-production-readiness-check.mjs'), 'utf8');
+    const pkg = readFileSync(resolve('package.json'), 'utf8');
+    expect(report).toContain('Production Readiness Report');
+    expect(report).toContain('Do not launch to production yet.');
+    expect(report).toContain('Security Audit Summary');
+    expect(report).toContain('Load Testing Results');
+    expect(report).toContain('Disaster Recovery Results');
+    expect(report).toContain('Observability Plan');
+    expect(report).toContain('Audit-log viewing cannot work through direct Firestore client reads under current rules.');
+    expect(report).toContain('Deployment Recommendation');
+    expect(script).toContain('Admin production readiness check passed.');
+    expect(pkg).toContain('check:admin-readiness');
+  });
 });
