@@ -497,13 +497,13 @@ function FeaturePage({ title, description, children }) {
 }
 
 function notificationText(item) {
-  const handle = item.authorHandle ? `@${item.authorHandle.replace(/^@/, '')}` : 'Someone';
-  if (item.type === 'like') return `${handle} liked your Post.`;
-  if (item.type === 'reply') return `${handle} replied to your Post.`;
-  if (item.type === 'quote_echo') return `${handle} added a Quote Echo to your Post.`;
-  if (item.type === 'echo') return `${handle} echoed your Post.`;
-  if (item.type === 'follow') return `${handle} followed you.`;
-  if (item.type === 'mention') return `${handle} mentioned you.`;
+  const actor = notificationActorName(item);
+  if (item.type === 'like' || item.type === 'reaction') return `${actor} liked your post.`;
+  if (item.type === 'reply') return `${actor} replied to your post.`;
+  if (item.type === 'quote_echo') return `${actor} quoted your post.`;
+  if (item.type === 'echo') return `${actor} echoed your post.`;
+  if (item.type === 'follow') return `${actor} followed you.`;
+  if (item.type === 'mention') return `${actor} mentioned you.`;
   if (item.type === 'handle_approval') return 'Your handle was approved.';
   if (item.type === 'portal_notice') return item.summary || 'Portal notice.';
   if (item.type === 'event_update') return item.summary || 'An Event you follow changed meaningfully.';
@@ -520,23 +520,22 @@ function notificationActorName(item) {
   return item.actorDisplayName || item.displayName || item.actorHandle || item.authorHandle || 'Portal';
 }
 
-function notificationActorHandle(item) {
-  if (item.type === 'portal_notice') return '';
-  return item.actorHandle || item.authorHandle || '';
-}
-
 function Notifications({ user }) {
   const [items, setItems] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
   const [filter, setFilter] = useState('All'); const [visible, setVisible] = useState(20);
   useEffect(() => { const stop = observePortalNotifications(user.uid, (snapshot) => { setItems(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))); setLoading(false); }, (reason) => { setError(firebaseMessage(reason)); setLoading(false); }); return stop; }, [user.uid]);
   async function open(item) { if (!item.read) { try { await markPortalNotificationRead(user.uid, item.id); } catch { /* read status can recover on the next refresh */ } } if (item.handle) window.location.hash = publicProfileRoute(item.handle).replace(/^#/, ''); else if (item.profileHandle) window.location.hash = publicProfileRoute(item.profileHandle).replace(/^#/, ''); else if (item.eventId) window.location.hash = `#/events/${item.eventId}`; else if (item.postId) window.location.hash = `#/posts/${item.postId}`; }
-  const categories = ['All', 'Likes', 'Replies', 'Echoes', 'Quote Echoes', 'Follows', 'Mentions', 'Handles'];
-  const categoryType = { Likes: 'like', Replies: 'reply', Echoes: 'echo', 'Quote Echoes': 'quote_echo', Follows: 'follow', Mentions: 'mention', Handles: 'handle_approval' };
-  const filtered = items.filter((item) => filter === 'All' || item.type === categoryType[filter]);
+  const categories = ['All', 'Mentions', 'Likes'];
+  const filtered = items.filter((item) => {
+    if (filter === 'All') return true;
+    if (filter === 'Mentions') return item.type === 'mention' && (!item.mentionedUid || item.mentionedUid === user.uid) && (!item.targetUid || item.targetUid === user.uid);
+    if (filter === 'Likes') return item.type === 'like' || item.type === 'reaction';
+    return true;
+  });
   async function markAll() { try { await markAllPortalNotificationsRead(user.uid, filtered); } catch (reason) { setError(firebaseMessage(reason)); } }
   if (loading) return <Loading label="Gathering notifications..." />;
   if (error) return <ErrorState message={error} />;
-  return <div className="page notifications-page"><div className="section-header"><div><h1 className="display-xl">Notifications</h1><p className="body-md">Likes, replies, Echoes, mentions, handles and Portal notices.</p></div><button className="btn btn-secondary btn-sm" type="button" onClick={markAll} disabled={!filtered.some((item) => !item.read)}>Mark all read</button></div><div className="tabs" role="tablist">{categories.map((item) => <button className={`tab ${filter === item ? 'active' : ''}`} role="tab" aria-selected={filter === item} type="button" onClick={() => { setFilter(item); setVisible(20); }} key={item}>{item}</button>)}</div><div className="stack notification-feed">{filtered.length ? filtered.slice(0, visible).map((item) => { const actorHandle = notificationActorHandle(item); return <button key={item.id} className={`glass card notification-card modern ${item.read ? '' : 'unread'}`} type="button" onClick={() => open(item)}><span className="notification-avatar">{item.actorPhotoUrl && item.type !== 'portal_notice' ? <img src={item.actorPhotoUrl} alt="" /> : notificationIcon(item.type)}</span><span className="notification-copy"><strong>{notificationActorName(item)}</strong><span>{actorHandle ? `@${String(actorHandle).replace(/^@/, '')} · ` : ''}{notificationText(item)}</span>{item.postPreview || item.preview ? <small>{item.postPreview || item.preview}</small> : null}</span><time>{relativeTime(item.createdAt)}</time></button>; }) : <div className="glass card empty-state compact-empty"><h2 className="display-md">Quiet for now</h2><p className="body-sm">Activity matching this filter will appear here live.</p></div>}{visible < filtered.length ? <button className="btn btn-secondary" type="button" onClick={() => setVisible((count) => count + 20)}>Load more</button> : null}</div></div>;
+  return <div className="page notifications-page"><div className="section-header"><div><h1 className="display-xl">Notifications</h1><p className="body-md">All activity, direct mentions and likes.</p></div><button className="btn btn-secondary btn-sm" type="button" onClick={markAll} disabled={!filtered.some((item) => !item.read)}>Mark all read</button></div><div className="tabs" role="tablist">{categories.map((item) => <button className={`tab ${filter === item ? 'active' : ''}`} role="tab" aria-selected={filter === item} type="button" onClick={() => { setFilter(item); setVisible(20); }} key={item}>{item}</button>)}</div><div className="stack notification-feed">{filtered.length ? filtered.slice(0, visible).map((item) => <button key={item.id} className={`glass card notification-card modern ${item.read ? '' : 'unread'}`} type="button" onClick={() => open(item)}><span className="notification-avatar">{item.actorPhotoUrl && item.type !== 'portal_notice' ? <img src={item.actorPhotoUrl} alt="" /> : notificationIcon(item.type)}</span><span className="notification-copy"><strong>{notificationActorName(item)}</strong><span>{notificationText(item)}</span>{item.postPreview || item.preview ? <small>{item.postPreview || item.preview}</small> : null}</span><time>{relativeTime(item.createdAt)}</time></button>) : <div className="glass card empty-state compact-empty"><h2 className="display-md">Quiet for now</h2><p className="body-sm">Activity matching this filter will appear here live.</p></div>}{visible < filtered.length ? <button className="btn btn-secondary" type="button" onClick={() => setVisible((count) => count + 20)}>Load more</button> : null}</div></div>;
 }
 
 function Messages({ user }) {

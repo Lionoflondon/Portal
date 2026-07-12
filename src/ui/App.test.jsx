@@ -246,4 +246,25 @@ describe('Portal app shell', () => {
     expect(service).toContain('searchPortalProfiles(term)');
     expect(service).toContain('data.profiles || data || []');
   });
+
+  it('simplifies Notification Centre filters without changing backend notification types', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const notificationTextBlock = source.match(/function notificationText\([\s\S]*?\n}\n\nfunction notificationIcon/)?.[0] || '';
+    const notificationBlock = source.match(/function Notifications\([\s\S]*?\n}\n\nfunction Messages/)?.[0] || '';
+    expect(notificationBlock).toContain("const categories = ['All', 'Mentions', 'Likes'];");
+    expect(notificationBlock).toContain("if (filter === 'All') return true;");
+    expect(notificationBlock).toContain("if (filter === 'Mentions') return item.type === 'mention'");
+    expect(notificationBlock).toContain("if (filter === 'Likes') return item.type === 'like' || item.type === 'reaction';");
+    expect(notificationBlock).not.toContain("'Replies'");
+    expect(notificationBlock).not.toContain("'Echoes'");
+    expect(notificationBlock).not.toContain("'Quote Echoes'");
+    expect(notificationBlock).not.toContain("'Follows'");
+    expect(notificationBlock).not.toContain("'Handles'");
+    expect(notificationTextBlock).toContain('quoted your post.');
+    expect(notificationTextBlock).toContain('echoed your post.');
+    expect(notificationTextBlock).toContain('mentioned you.');
+    expect(notificationTextBlock).not.toContain('added a Quote Echo to your Post.');
+    expect(notificationTextBlock).not.toContain('echoed your Post.');
+    expect(notificationBlock).toContain('All activity, direct mentions and likes.');
+  });
 });
