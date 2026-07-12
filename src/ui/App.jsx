@@ -74,21 +74,22 @@ import {
 } from '../services/firebase.js';
 
 const iconPaths = {
-  home: '<path d="M3 11l9-8 9 8M5 10v10h14V10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
-  events: '<rect x="3" y="5" width="18" height="16" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
-  vortex: '<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M12 2v3M12 19v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
-  messages: '<path d="M21 11.5a8.5 8.5 0 01-12.4 7.6L3 21l1.9-5.7A8.5 8.5 0 1112.5 20" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
-  notifications: '<path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
-  profile: '<circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 20c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+  home: '<path d="M4 10.8 12 4l8 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 10v9.2h11V10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 19v-5h4v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  events: '<path d="M3 12h4l2-5 4 10 2-5h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  vortex: '<circle cx="12" cy="12" r="8.2" stroke="currentColor" stroke-width="2"/><path d="M12 3.8a8.2 8.2 0 0 1 7.1 12.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 20.2a8.2 8.2 0 0 1-7.1-12.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.4" stroke="currentColor" stroke-width="2"/>',
+  messages: '<path d="M5.2 6.5h13.6a2.7 2.7 0 0 1 2.7 2.7v5.8a2.7 2.7 0 0 1-2.7 2.7h-6.3L7 21v-3.3H5.2A2.7 2.7 0 0 1 2.5 15V9.2a2.7 2.7 0 0 1 2.7-2.7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  notifications: '<path d="M18 10.2a6 6 0 0 0-12 0c0 4.8-2 6.7-2 6.7h16s-2-1.9-2-6.7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14.2 20a2.4 2.4 0 0 1-4.4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  profile: '<rect x="3.5" y="5" width="17" height="14" rx="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="11" r="2.2" stroke="currentColor" stroke-width="2"/><path d="M13.5 10h3.8M13.5 14h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6.5 16.2c.7-1.3 1.5-1.9 2.5-1.9s1.8.6 2.5 1.9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   settings: '<circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
   premium: '<path d="M5 18h14l1.5-9-5 3-3.5-6-3.5 6-5-3L5 18z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
   creator: '<path d="M4 19V6a2 2 0 012-2h9l5 5v10a2 2 0 01-2 2H6a2 2 0 01-2-2z" stroke="currentColor" stroke-width="1.8"/><path d="M8 13l2.5 2.5L16 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
-  brand: '<path d="M3 9l9-6 9 6-9 6-9-6zM3 9v6l9 6 9-6V9" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
-  admin: '<path d="M12 2l8 4v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+  brand: '<path d="M12 3.5 19.5 7v5.2c0 4.8-3.1 7.4-7.5 8.3-4.4-.9-7.5-3.5-7.5-8.3V7L12 3.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.2 12.2 11.2 14l3.8-4.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  admin: '<path d="m12 4 2.35 4.75 5.25.76-3.8 3.7.9 5.23L12 16l-4.7 2.44.9-5.23-3.8-3.7 5.25-.76L12 4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  create: '<path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   search: '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
 };
 
-function Icon({ name }) { return <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconPaths[name] || '' }} />; }
+function Icon({ name }) { return <svg className={name === 'vortex' ? 'vortex-icon' : undefined} viewBox="0 0 24 24" fill="none" aria-hidden="true" dangerouslySetInnerHTML={{ __html: iconPaths[name] || '' }} />; }
 function initials(name = '') { return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'P'; }
 function Avatar({ children, size = 'md' }) { return <span className={`avatar size-${size}`}>{children}</span>; }
 function timeLabel(value) { return value?.toDate ? value.toDate().toLocaleDateString() : 'Now'; }
@@ -135,7 +136,7 @@ function Brand() { return <a href="#/" className="brand" aria-label="Portal home
 function NavLink({ route, current }) { const active = route.path === '/' ? current === '/' : current === route.path || current.startsWith(`${route.path}?`); return <a href={`#${route.path}`} className="nav-item" aria-current={active ? 'page' : undefined}><Icon name={route.icon} /><span>{route.label}</span></a>; }
 
 function Sidebar({ current, onCreate }) {
-  return <nav className="sidebar desktop-only" aria-label="Primary"><Brand /><div className="nav-group">{routes.map((route) => <NavLink key={route.path} route={route} current={current} />)}</div><button className="create-btn" onClick={onCreate} aria-haspopup="dialog"><span>+</span>Create</button><div className="nav-group secondary-nav"><div className="eyebrow nav-label">More</div>{secondaryRoutes.map((route) => <NavLink key={route.path} route={route} current={current} />)}</div></nav>;
+  return <nav className="sidebar desktop-only" aria-label="Primary"><Brand /><div className="nav-group">{routes.map((route) => <NavLink key={route.path} route={route} current={current} />)}</div><button className="create-btn" onClick={onCreate} aria-haspopup="dialog"><Icon name="create" />Create</button><div className="nav-group secondary-nav"><div className="eyebrow nav-label">More</div>{secondaryRoutes.map((route) => <NavLink key={route.path} route={route} current={current} />)}</div></nav>;
 }
 function Topbar({ profile }) { return <header className="topbar mobile-only"><Brand /><div className="topbar-actions"><a aria-label="Open settings" href="#/settings"><Avatar size="sm">{initials(profile?.displayName)}</Avatar></a></div></header>; }
 function BottomNav({ current }) { return <nav className="bottom-nav mobile-only" aria-label="Primary">{['/', '/events', '/vortex', '/marketplace', '/profile'].map((path) => { const route = routes.find((item) => item.path === path); const active = path === '/' ? current === '/' : current === path || current.startsWith(`${path}?`); return <a key={path} href={`#${path}`} className={`bnav-item ${path === '/vortex' ? 'vortex-center' : ''}`} aria-current={active ? 'page' : undefined}><Icon name={route.icon} /><span>{route.label}</span></a>; })}</nav>; }

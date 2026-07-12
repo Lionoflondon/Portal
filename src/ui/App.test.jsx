@@ -24,6 +24,26 @@ describe('Portal app shell', () => {
     expect(secondaryRoutes.map((route) => route.label)).toEqual(['Official Sources', 'Custodians']);
   });
 
+  it('uses the Portal teal navigation icon and primary action system', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    expect(source).toContain("home: '<path d=\"M4 10.8 12 4l8 6.8\"");
+    expect(source).toContain("events: '<path d=\"M3 12h4l2-5 4 10 2-5h6\"");
+    expect(source).toContain("messages: '<path d=\"M5.2 6.5h13.6");
+    expect(source).toContain("notifications: '<path d=\"M18 10.2a6 6 0 0 0-12 0");
+    expect(source).toContain("profile: '<rect x=\"3.5\" y=\"5\" width=\"17\" height=\"14\"");
+    expect(source).toContain("brand: '<path d=\"M12 3.5 19.5 7v5.2");
+    expect(source).toContain("admin: '<path d=\"m12 4 2.35 4.75");
+    expect(source).toContain("create: '<path d=\"M12 5v14M5 12h14\"");
+    expect(source).toContain("className={name === 'vortex' ? 'vortex-icon' : undefined}");
+    expect(source).toContain('<Icon name="create" />Create');
+    expect(styles).toContain('--accent:#63D6F2');
+    expect(styles).toContain('--nav-inactive:#7E8798');
+    expect(styles).toContain('.nav-item[aria-current=page]{color:var(--accent);background:rgba(99,214,242,.10)');
+    expect(styles).toContain('.btn-primary{background:var(--accent);color:#fff');
+    expect(styles).toContain('.create-btn{margin-top:6px;display:flex;align-items:center;justify-content:center;gap:8px;padding:13px 16px;border-radius:16px;background:var(--accent);color:#fff');
+  });
+
   it('keeps event discovery out of Home and routes it to Events', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const homeBlock = source.match(/function Home\([\s\S]*?\n}\n\nfunction PostComposer/)?.[0] || '';
