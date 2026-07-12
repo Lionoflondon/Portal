@@ -21,7 +21,7 @@ describe('Portal app shell', () => {
   });
 
   it('keeps account-only destinations out of the visible sidebar', () => {
-    expect(secondaryRoutes.map((route) => route.label)).toEqual(['Official Sources', 'Custodians']);
+    expect(secondaryRoutes.map((route) => route.label)).toEqual(['Official Sources', 'Marketplace']);
   });
 
   it('uses the Portal teal navigation icon and primary action system', () => {
