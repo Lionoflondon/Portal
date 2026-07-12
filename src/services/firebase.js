@@ -245,10 +245,13 @@ async function compressImage(file) {
 
 function uploadPostFile(user, draftId, file, kind, onProgress) {
   const path = `post-media/${user.uid}/${draftId}/${kind}-${safeFileName(file)}`;
-  const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, { contentType: file.type });
+  const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, {
+    contentType: file.type,
+    customMetadata: { ownerUid: user.uid, draftId, originalName: file.name || 'media' },
+  });
   return new Promise((resolve, reject) => {
     task.on('state_changed', (snapshot) => onProgress?.(kind, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
-      try { resolve({ url: await getDownloadURL(task.snapshot.ref), path, contentType: file.type, size: file.size }); } catch (error) { reject(error); }
+      try { resolve({ url: await getDownloadURL(task.snapshot.ref), path, contentType: file.type, size: file.size, name: file.name || 'media' }); } catch (error) { reject(error); }
     });
   });
 }

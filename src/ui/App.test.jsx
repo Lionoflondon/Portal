@@ -151,6 +151,8 @@ describe('Portal app shell', () => {
     expect(composerBlock).toContain('id="post-media-picker"');
     expect(composerBlock).toContain('accept="image/*,video/*"');
     expect(composerBlock).toContain('pickMediaFiles');
+    expect(composerBlock).toContain('photoPreviews');
+    expect(composerBlock).toContain('URL.revokeObjectURL');
     expect(composerBlock).toContain('compact-media-preview');
     expect(composerBlock).toContain('Auto title preview');
     expect(composerBlock).toContain('Current location');
@@ -169,6 +171,13 @@ describe('Portal app shell', () => {
     expect(mediaBlock).toContain('post-video');
     expect(mediaBlock).toContain('Attached link');
     expect(mediaBlock).toContain('poll-option');
+    const serviceSource = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const functionsSource = readFileSync(resolve('functions/index.js'), 'utf8');
+    expect(serviceSource).toContain('customMetadata');
+    expect(serviceSource).toContain('originalName');
+    expect(serviceSource).toContain("name: file.name || 'media'");
+    expect(functionsSource).toContain("name: String(item.name || '').slice(0, 160)");
+    expect(functionsSource).toContain("name: String(videoInput.name || '').slice(0, 160)");
   });
 
   it('uses a premium SVG feed interaction bar with Echo copy only in the menu', () => {

@@ -205,6 +205,7 @@ export const createPortalPost = onCall(async (request) => {
     url: String(item.url || ''),
     path: String(item.path || ''),
     contentType: String(item.contentType || ''),
+    name: String(item.name || '').slice(0, 160),
     width: Number(item.width || 0),
     height: Number(item.height || 0),
     size: Number(item.size || 0),
@@ -215,6 +216,7 @@ export const createPortalPost = onCall(async (request) => {
     path: String(videoInput.path),
     thumbnailUrl: String(videoInput.thumbnailUrl || ''),
     contentType: String(videoInput.contentType || ''),
+    name: String(videoInput.name || '').slice(0, 160),
     size: Number(videoInput.size || 0),
     duration: Number(videoInput.duration || 0),
   } : null;
