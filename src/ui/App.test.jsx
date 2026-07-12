@@ -33,7 +33,7 @@ describe('Portal app shell', () => {
     expect(source).toContain("notifications: '<path d=\"M18 10.2a6 6 0 0 0-12 0");
     expect(source).toContain("profile: '<rect x=\"3.5\" y=\"5\" width=\"17\" height=\"14\"");
     expect(source).toContain("brand: '<path d=\"M12 3.5 19.5 7v5.2");
-    expect(source).toContain("admin: '<path d=\"m12 4 2.35 4.75");
+    expect(source).toContain("custodians: '<path d=\"m12 4 2.35 4.75");
     expect(source).toContain("create: '<path d=\"M12 5v14M5 12h14\"");
     expect(source).toContain("className={name === 'vortex' ? 'vortex-icon' : undefined}");
     expect(source).toContain('<Icon name="create" />Create');
@@ -57,7 +57,7 @@ describe('Portal app shell', () => {
 
   it('keeps handle purchasing inside Marketplace with development payment copy', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
-    const marketplaceBlock = source.match(/function HandleMarketplace\([\s\S]*?\n}\n\nfunction AdminHandleRegistry/)?.[0] || '';
+    const marketplaceBlock = source.match(/function HandleMarketplace\([\s\S]*?\n}\n\nfunction HandleIdentity/)?.[0] || '';
     expect(marketplaceBlock).toContain('Reserve, discover and trade eligible Portal identities.');
     expect(marketplaceBlock).toContain('Reserve your free handle');
     expect(marketplaceBlock).toContain('Handle lifecycle');
@@ -67,6 +67,24 @@ describe('Portal app shell', () => {
     expect(marketplaceBlock).toContain('Temporary Development Mode');
     expect(marketplaceBlock).toContain('Placeholder payment approved.');
     expect(marketplaceBlock).not.toContain('Stripe');
+    expect(marketplaceBlock).not.toContain('Admin approval');
+    expect(marketplaceBlock).not.toContain('Portal admin');
+  });
+
+  it('keeps Public Portal isolated from Admin routes and components', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    expect(source).not.toContain('AdminWorkspace');
+    expect(source).not.toContain('AdminHandleRegistry');
+    expect(source).not.toContain("current === '/admin'");
+    expect(source).not.toContain("startsWith('/admin/");
+    expect(source).not.toContain('getPortalAdminHandle');
+    expect(source).not.toContain('managePortalHandleRegistry');
+    expect(source).not.toContain('reclaimPortalHandle');
+    expect(source).not.toContain('portalAdmin');
+    expect(styles).not.toContain('.admin-shell');
+    expect(styles).not.toContain('.admin-nav');
+    expect(styles).not.toContain('.pulse-meter');
   });
 
   it('uses Profile as a handle summary instead of a second marketplace', () => {

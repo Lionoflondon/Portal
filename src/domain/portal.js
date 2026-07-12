@@ -13,5 +13,5 @@ export const routes = [
 
 export const secondaryRoutes = [
   { path: '/sources', label: 'Official Sources', icon: 'brand' },
-  { path: '/custodians', label: 'Custodians', icon: 'admin' },
+  { path: '/custodians', label: 'Custodians', icon: 'custodians' },
 ];

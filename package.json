@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:admin": "vite build --config vite.admin.config.js",
+    "guard:isolation": "node scripts/guard-portal-isolation.mjs",
+    "build": "npm run guard:isolation && vite build",
+    "build:admin": "npm run guard:isolation && vite build --config vite.admin.config.js",
     "lint": "eslint .",
     "test": "vitest run src",
     "test:vortex": "node --test functions/entry-engine.test.js",

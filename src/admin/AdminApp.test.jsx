@@ -44,8 +44,9 @@ describe('Portal Admin authentication', () => {
     const entry = readFileSync(resolve('admin/src/main.jsx'), 'utf8');
     const config = readFileSync(resolve('vite.admin.config.js'), 'utf8');
     const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
-    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const styles = readFileSync(resolve('src/admin/admin.css'), 'utf8');
     expect(entry).toContain("AdminApp from '@portal/admin/AdminApp.jsx'");
+    expect(entry).toContain("import '@portal/admin/admin.css'");
     expect(config).toContain("root: 'admin'");
     expect(config).toContain('envDir: repoRoot');
     expect(config).toContain("outDir: '../dist-admin'");
@@ -60,7 +61,7 @@ describe('Portal Admin authentication', () => {
 
   it('builds the Vortex Control Centre around Pulse instead of exposed confidence wording', () => {
     const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
-    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const styles = readFileSync(resolve('src/admin/admin.css'), 'utf8');
     expect(adminSource).toContain('function VortexControlCentre');
     expect(adminSource).toContain('Vortex Control Centre');
     expect(adminSource).toContain('Pulse Strength');
@@ -96,5 +97,15 @@ describe('Portal Admin authentication', () => {
     expect(styles).toContain('background:var(--accent)');
     expect(styles).toContain('.pulse-graph');
     expect(styles).toContain('@keyframes pulse-flow');
+  });
+
+  it('keeps Admin isolated from Public Portal UI modules', () => {
+    const entry = readFileSync(resolve('admin/src/main.jsx'), 'utf8');
+    const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
+    expect(entry).not.toContain('@portal/ui');
+    expect(adminSource).not.toContain("from '../ui/");
+    expect(adminSource).not.toContain('PostCard');
+    expect(adminSource).not.toContain('QuoteEchoComposer');
+    expect(adminSource).not.toContain('interaction-bar');
   });
 });
