@@ -379,8 +379,8 @@ describe('Portal app shell', () => {
     expect(postCardBlock).toContain('<ActionIcon name="share" />');
     expect(postCardBlock).toContain('interaction-label');
     expect(postCardBlock).toContain('interaction-count');
-    expect(postCardBlock).toContain("aria-label={liked ? 'Unlike' : 'Like'}");
-    expect(postCardBlock).toContain('aria-label="Reply"');
+    expect(postCardBlock).toContain("aria-label={liked ? 'Remove Love' : 'Love'}");
+    expect(postCardBlock).toContain('aria-label="Comment"');
     expect(postCardBlock).toContain('aria-label="Echo"');
     expect(postCardBlock).toContain("aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark'}");
     expect(postCardBlock).toContain('aria-label="Share"');
@@ -394,6 +394,35 @@ describe('Portal app shell', () => {
     expect(postCardBlock).not.toContain('Undo Echo');
     expect(postCardBlock).not.toContain('Echoes</span>');
     expect(postCardBlock).not.toContain('echoed</p>');
+  });
+
+  it('renders creator support, resolved notification actors and focused discovery polish', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const icons = readFileSync(resolve('src/ui/icons.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const postCardBlock = source.match(/function PostCard\([\s\S]*?\n}\n\nfunction Home/)?.[0] || '';
+    const notificationBlock = source.match(/function Notifications\([\s\S]*?\n}\n\nfunction Messages/)?.[0] || '';
+    expect(postCardBlock).toContain('supportEligible');
+    expect(postCardBlock).toContain('supportReady');
+    expect(postCardBlock).toContain('<ActionIcon name="support" />');
+    expect(postCardBlock).toContain('This creator is not currently eligible to receive support.');
+    expect(postCardBlock).toContain('<span className="interaction-label">Love</span>');
+    expect(postCardBlock).toContain('<span className="interaction-label">Comment</span>');
+    expect(postCardBlock).toContain('<span className="interaction-label">Echo</span>');
+    expect(postCardBlock).toContain('<span className="interaction-label">Support</span>');
+    expect(icons).toContain("name === 'support'");
+    expect(service).toContain('getPortalPublicProfiles');
+    expect(service).toContain("'publicProfiles', uid");
+    expect(notificationBlock).toContain('actorProfiles[notificationActorUid(item)]');
+    expect(notificationBlock).toContain('actor.profilePhotoUrl');
+    expect(notificationBlock).toContain('actor.verificationState');
+    expect(notificationBlock).toContain('notification-verified');
+    expect(source).not.toContain("|| 'Portal';\n}");
+    expect(styles).toContain('.home-widgets .creator-grid{grid-template-columns:1fr');
+    expect(styles).toContain('.creator-card{grid-template-columns:40px minmax(0,1fr) auto');
+    expect(styles).toContain('.vortex-field:focus-within');
+    expect(styles).toContain('@keyframes vortex-iridescent');
   });
 
   it('opens Post detail for threaded replies and exact timestamps', () => {

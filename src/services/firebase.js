@@ -557,6 +557,19 @@ export async function getPortalProfile(uid) {
   return getDoc(doc(requireService(portalDb, 'Firestore'), 'users', uid));
 }
 
+const publicProfileRequests = new Map();
+export async function getPortalPublicProfiles(uids = []) {
+  const db = requireService(portalDb, 'Firestore');
+  const unique = [...new Set(uids.filter(Boolean))];
+  const pairs = await Promise.all(unique.map(async (uid) => {
+    if (!publicProfileRequests.has(uid)) {
+      publicProfileRequests.set(uid, getDoc(doc(db, 'publicProfiles', uid)).then((snapshot) => snapshot.exists() ? { uid: snapshot.id, ...snapshot.data() } : null).catch((error) => { publicProfileRequests.delete(uid); throw error; }));
+    }
+    return [uid, await publicProfileRequests.get(uid)];
+  }));
+  return Object.fromEntries(pairs.filter(([, profile]) => profile));
+}
+
 function callPortalIdentity(name, payload) {
   return httpsCallable(requireService(portalFunctions, 'Functions'), name)(payload).then((result) => result.data);
 }
