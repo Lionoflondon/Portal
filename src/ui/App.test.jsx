@@ -126,9 +126,9 @@ describe('Portal app shell', () => {
     expect(formBlock).toContain('Public');
     expect(formBlock).toContain('Followers');
     expect(formBlock).toContain('Private');
-    expect(formBlock).toContain('Vortex story hint');
-    expect(formBlock).toContain('This never merges Event ownership, media, comments or URLs.');
-    expect(formBlock).toContain("eventReaches.map((reach)");
+    expect(formBlock).toContain('Original discussion');
+    expect(formBlock).toContain('Vortex may cluster related activity without merging ownership or attribution.');
+    expect(formBlock).toContain("reach: 'Random'");
     expect(source).toContain("const eventReaches = ['Random', 'Local', 'Citywide', 'National', 'Global']");
     expect(source).toContain("const value = event.reach || event.reachClassification || 'Random'");
     expect(source).toContain('function useEventMasonryColumns()');
@@ -561,6 +561,10 @@ describe('Portal app shell', () => {
 
     expect(composerBlock).toContain('Save draft');
     expect(composerBlock).toContain('Schedule');
+    expect(composerBlock).toContain('Start a conversation');
+    expect(composerBlock).toContain('Share a thought, story, link or moment with Portal.');
+    expect(composerBlock).toContain('Preview');
+    expect(composerBlock).toContain('post-publish-preview');
     expect(composerBlock).toContain('Scheduling is prepared in the composer');
     expect(profileBlock).toContain('profile-cover');
     expect(profileBlock).toContain('Events attended');
@@ -588,5 +592,25 @@ describe('Portal app shell', () => {
     expect(styles).toContain('.settings-grid');
     expect(styles).toContain('.event-mini-map');
     expect(styles).toContain('.profile-metrics');
+  });
+
+  it('keeps creation focused on social conversations and community-led events', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const composerBlock = source.match(/function PostComposer\([\s\S]*?\n}\n\nfunction PostDetail/)?.[0] || '';
+    const formBlock = source.match(/function EventForm\([\s\S]*?\n}\n\nfunction Events/)?.[0] || '';
+    expect(composerBlock).toContain('What do you want to share?');
+    expect(composerBlock).toContain('Save draft');
+    expect(composerBlock).toContain('Schedule for');
+    expect(composerBlock).toContain('uploadPortalPostMedia');
+    expect(formBlock).toContain('Create an Event from a conversation');
+    expect(formBlock).toContain('What is happening, and why should people care?');
+    expect(formBlock).toContain('Who is it for?');
+    expect(formBlock).toContain('What should attendees expect?');
+    expect(formBlock).toContain('Venue');
+    expect(formBlock).toContain('Capacity');
+    expect(formBlock).toContain('Registration');
+    expect(formBlock).toContain('Organiser details');
+    expect(formBlock).toContain('Original discussion');
+    expect(formBlock).toContain('Events stay connected to the conversations that inspired them.');
   });
 });
