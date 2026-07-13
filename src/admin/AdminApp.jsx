@@ -3,6 +3,7 @@ import {
   changePortalPassword,
   executePortalAdminAction,
   getPortalAdminHandle,
+  getPortalAdminUserRecord,
   getPortalTokenClaims,
   hasFirebaseConfig,
   managePortalHandleRegistry,
@@ -50,12 +51,12 @@ function formatMoney(amount, currency = 'GBP') {
 
 function timeLabel(value) {
   if (!value) return 'Not set';
-  const date = value.toDate ? value.toDate() : value instanceof Date ? value : null;
-  return date ? date.toLocaleDateString() : 'Not set';
+  const date = value.toDate ? value.toDate() : value instanceof Date ? value : typeof value === 'string' ? new Date(value) : value?._seconds ? new Date(value._seconds * 1000) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Not available';
 }
 
 function relativeTime(value) {
-  const date = value?.toDate ? value.toDate() : value instanceof Date ? value : null;
+  const date = value?.toDate ? value.toDate() : value instanceof Date ? value : typeof value === 'string' ? new Date(value) : value?._seconds ? new Date(value._seconds * 1000) : null;
   if (!date) return 'Not set';
   const diff = Date.now() - date.getTime();
   if (diff < 60_000) return 'Just now';
@@ -65,7 +66,7 @@ function relativeTime(value) {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
-function useAdminCollection(key, search = '', max = 50) {
+function useAdminCollection(key, search = '', max = 1000) {
   const [items, setItems] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -95,12 +96,20 @@ function valueForPath(item = {}, path = '') {
 }
 
 function displayValue(value) {
-  if (value === undefined || value === null || value === '') return '—';
-  if (value?.toDate || value instanceof Date) return relativeTime(value);
+  if (value === undefined || value === null || value === '') return 'Not available';
+  if (value?.toDate || value instanceof Date || value?._seconds) return timeLabel(value);
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) return timeLabel(value);
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (Array.isArray(value)) return value.length ? value.join(', ') : '—';
-  if (typeof value === 'object') return JSON.stringify(value).slice(0, 80);
+  if (Array.isArray(value)) return value.length ? value.map((item) => typeof item === 'object' ? item.id || item.handle || item.action || 'Record' : item).join(', ') : 'Not available';
+  if (typeof value === 'object') return 'Available';
   return String(value);
+}
+
+function renderAdminCell(column, value, item) {
+  if (column === 'Profile photo') return value ? <img className="admin-user-avatar" src={value} alt="" /> : <Avatar>{initials(item.displayName || item.email)}</Avatar>;
+  if (column === 'Handle') return value ? `@${value}` : 'Not available';
+  if (['Joined', 'Last active'].includes(column)) return timeLabel(value);
+  return displayValue(value);
 }
 
 async function runAdminAction(action, payload = {}) {
@@ -492,13 +501,37 @@ function AdminDashboard() {
   return <div className="page enterprise-dashboard"><div><h1 className="display-xl">Dashboard</h1><p className="body-md">Enterprise operations overview for Portal staff.</p></div><div className="admin-kpi-grid">{dashboardKpis.map((label) => <article className="glass card admin-kpi-card" key={label}><span className="eyebrow">{label}</span><strong>{kpiValues[label]}</strong><small>Live backend metric</small></article>)}</div><section className="admin-chart-grid">{dashboardCharts.map((label) => <article className="glass card admin-chart-card" key={label}><div className="section-header"><h2>{label}</h2><span className="source-chip">Live</span></div><div className="admin-chart-placeholder" aria-label={`${label} chart`} /></article>)}</section><section className="glass card"><h2 className="display-md">Activity feed</h2><div className="admin-activity-list">{dashboardActivity.map((item) => <article className="admin-activity-row" key={item}><span className="source-chip">{item}</span><p className="body-sm">{moderation.error || users.error || events.error || 'Live activity appears as backend records arrive.'}</p></article>)}</div></section><section className="admin-chart-grid"><article className="glass card"><h2 className="display-md">Sensitive Action Approvals</h2><p className="body-sm">Approval request, Approve, Reject, Approval history and reason required for permanent bans, protected handle transfers, government handle changes, verification removal, platform-wide broadcasts, marketplace reversals and large creator payout approvals.</p><span className="source-chip">{approvals.items.length} pending or recent</span></article><article className="glass card"><h2 className="display-md">Admin Session Security</h2><p className="body-sm">Current admin sessions, Last login, IP, Device, Location, Session expiry, Force logout and recent authentication checks for sensitive actions.</p><span className="source-chip">{sessions.items.length} active records</span></article></section><AdminPasswordPanel /></div>;
 }
 
+function UserProfileDrawer({ user, loading, actions, onAction, onClose }) {
+  const marketplace = user.marketplace || {};
+  const memberships = user.memberships || {};
+  const sections = [
+    ['Account', [['Joined', user.createdAt], ['Last login', user.lastLoginAt], ['Last active', user.lastActiveAt], ['Providers', user.providers], ['Email verified', user.emailVerified], ['Disabled', user.disabled], ['Roles', user.roles], ['Sessions', user.sessions], ['Devices', user.devices], ['Account status', user.accountStatus]]],
+    ['Platform Membership', [['Sender', memberships.sender || user.sender], ['Rider', memberships.rider || user.rider], ['Portal', memberships.portal || user.portal], ['Business', memberships.business || user.business], ['Company', user.businessName]]],
+    ['Trust', [['Trust score', user.trustScore], ['Reports', user.reportCount], ['Warnings', user.warningCount], ['Suspensions', user.suspensionCount], ['Verification', user.verificationState]]],
+    ['Marketplace', [['Owned handles', marketplace.ownedHandles || user.marketplaceOwnershipCount], ['Listings', marketplace.listings || user.marketplaceListingCount], ['Purchases', marketplace.purchases || user.marketplacePurchaseCount], ['Handle ownership history', marketplace.ownershipHistory]]],
+    ['Portal', [['Followers', user.followerCount], ['Following', user.followingCount], ['Posts', user.postCount], ['Comments', user.commentCount], ['Events', user.eventCount]]],
+    ['Circum', [['Deliveries', user.circum?.deliveries], ['Bookings', user.circum?.bookings], ['Earnings', user.circum?.earnings], ['Roth balance', user.circum?.rothBalance]]],
+    ['Admin', [['Audit history', user.auditHistory]]],
+  ];
+  return <section className="glass card admin-drawer admin-user-drawer"><div className="admin-user-banner" style={user.bannerUrl ? { backgroundImage: `linear-gradient(180deg,rgba(7,9,15,.1),rgba(7,9,15,.78)),url(${user.bannerUrl})` } : undefined} /><div className="section-header"><div className="admin-user-identity">{user.profilePhotoUrl ? <img className="admin-user-avatar large" src={user.profilePhotoUrl} alt="" /> : <Avatar>{initials(user.displayName || user.email)}</Avatar>}<span><h2>{user.displayName || 'Not available'}</h2><small>{user.normalizedHandle ? `@${user.normalizedHandle}` : 'No handle'}</small></span></div><button className="btn btn-secondary btn-sm" type="button" onClick={onClose}>Close</button></div><div className="admin-detail-grid user-contact-grid"><span><strong>UID</strong>{displayValue(user.uid)}</span><span><strong>Email</strong>{displayValue(user.email)}</span><span><strong>Phone</strong>{displayValue(user.phone)}</span></div>{loading ? <p className="body-sm">Loading complete user record...</p> : sections.map(([title, fields]) => <section className="admin-user-section" key={title}><h3>{title}</h3><div className="admin-detail-grid">{fields.map(([label, value]) => <span key={label}><strong>{label}</strong>{displayValue(value)}</span>)}</div></section>)}<div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => onAction(action, user)} key={action}>{action}</button>)}</div></section>;
+}
+
 function AdminDataTable({ title, description, searchPlaceholder, columns, rowFields = [], actions = [], queues = [], collectionKey, detailFields = [] }) {
   const [term, setTerm] = useState('');
   const { items, error, loading } = useAdminCollection(collectionKey, collectionKey === 'users' ? term : '');
   const [selected, setSelected] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
   const filtered = items.filter((item) => JSON.stringify(item).toLowerCase().includes(term.toLowerCase()));
+  async function selectItem(item) {
+    setSelected(item); setActionError('');
+    if (title !== 'Users') return;
+    setDetailLoading(true);
+    try { const result = await getPortalAdminUserRecord(item.uid || item.id); setSelected(result.user || item); }
+    catch (reason) { setActionError(firebaseMessage(reason)); }
+    finally { setDetailLoading(false); }
+  }
   async function actionClick(action, target = selected) {
     setNotice(''); setActionError('');
     try {
@@ -519,11 +552,11 @@ function AdminDataTable({ title, description, searchPlaceholder, columns, rowFie
       await runAdminAction(normalizedAction, { entityType: title, targetId: target?.id || null, reason: 'admin_v4_privileged_action' }); setNotice(`${action} requested through callable function.`);
     } catch (reason) { setActionError(firebaseMessage(reason)); }
   }
-  return <div className="page admin-ops-page"><div><h1 className="display-xl">{title}</h1><p className="body-md">{description}</p></div>{title === 'Moderation' ? <section className="glass card"><h2 className="display-md">Moderator Productivity</h2><p className="body-sm">Saved filters, pinned queues, keyboard shortcuts, bulk actions, Quick approve, Quick remove, Quick suspend, context side panel, live updates and undo for reversible actions.</p></section> : null}{queues.length ? <div className="admin-queue-grid">{queues.map((queue) => <button className="glass card admin-queue-card" type="button" key={queue}><strong>{queue}</strong><span className="body-sm">{items.filter((item) => String(item.queue || item.category || item.type || '').toLowerCase().includes(queue.toLowerCase().split(' ')[0])).length} pending</span></button>)}</div> : null}<section className="glass card"><div className="section-header"><h2>{title} search</h2><span className="source-chip">Live Firestore read · Cloud Functions only · No direct client writes</span></div><label className="admin-search-field">Global search<input value={term} onChange={(event) => setTerm(event.target.value)} placeholder={searchPlaceholder} /></label>{error || actionError ? <p className="form-error" role="alert">{error || actionError}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<div className="admin-table" role="table" aria-label={title}><div className="admin-table-row admin-table-head" role="row">{columns.map((column) => <span role="columnheader" key={column}>{column}</span>)}</div>{loading ? <div className="admin-table-row empty" role="row"><span role="cell">Loading live records...</span>{columns.slice(1).map((column) => <span role="cell" key={column}>—</span>)}</div> : filtered.length ? filtered.slice(0, 25).map((item) => <button className="admin-table-row clickable" role="row" type="button" onClick={() => setSelected(item)} key={item.id}>{columns.map((column, index) => <span role="cell" key={column}>{displayValue(valueForPath(item, rowFields[index] || column))}</span>)}</button>) : <div className="admin-table-row empty" role="row">{columns.map((column, index) => <span role="cell" key={column}>{index === 0 ? 'No matching live records' : '—'}</span>)}</div>}</div></section>{selected ? <section className="glass card admin-drawer"><div className="section-header"><h2>{title} profile drawer</h2><button className="btn btn-secondary btn-sm" type="button" onClick={() => setSelected(null)}>Close</button></div><div className="admin-detail-grid">{(detailFields.length ? detailFields : columns).map((field) => <span key={field}><strong>{field}</strong>{displayValue(valueForPath(selected, field) ?? valueForPath(selected, field.toLowerCase().replaceAll(' ', '')))}</span>)}</div>{actions.length ? <div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => actionClick(action)} key={action}>{action}</button>)}</div> : null}</section> : null}{actions.length && !selected ? <section className="glass card"><h2 className="display-md">Actions</h2><div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => actionClick(action, null)} key={action}>{action}</button>)}</div></section> : null}</div>;
+  return <div className="page admin-ops-page"><div><h1 className="display-xl">{title}</h1><p className="body-md">{description}</p></div>{title === 'Moderation' ? <section className="glass card"><h2 className="display-md">Moderator Productivity</h2><p className="body-sm">Saved filters, pinned queues, keyboard shortcuts, bulk actions, Quick approve, Quick remove, Quick suspend, context side panel, live updates and undo for reversible actions.</p></section> : null}{queues.length ? <div className="admin-queue-grid">{queues.map((queue) => <button className="glass card admin-queue-card" type="button" key={queue}><strong>{queue}</strong><span className="body-sm">{items.filter((item) => String(item.queue || item.category || item.type || '').toLowerCase().includes(queue.toLowerCase().split(' ')[0])).length} pending</span></button>)}</div> : null}<section className="glass card"><div className="section-header"><h2>{title} search</h2><span className="source-chip">Cloud Functions only · No direct client writes</span></div><label className="admin-search-field">Global search<input value={term} onChange={(event) => setTerm(event.target.value)} placeholder={searchPlaceholder} /></label>{error || actionError ? <p className="form-error" role="alert">{error || actionError}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<div className="admin-table" role="table" aria-label={title}><div className="admin-table-row admin-table-head" role="row">{columns.map((column) => <span role="columnheader" key={column}>{column}</span>)}</div>{loading ? <div className="admin-table-row empty" role="row"><span role="cell">Loading live records...</span>{columns.slice(1).map((column) => <span role="cell" key={column}>Not available</span>)}</div> : filtered.length ? filtered.slice(0, 250).map((item) => <button className="admin-table-row clickable" role="row" type="button" onClick={() => selectItem(item)} key={item.id}>{columns.map((column, index) => <span role="cell" key={column}>{renderAdminCell(column, valueForPath(item, rowFields[index] || column), item)}</span>)}</button>) : <div className="admin-table-row empty" role="row">{columns.map((column, index) => <span role="cell" key={column}>{index === 0 ? 'No matching live records' : 'Not available'}</span>)}</div>}</div></section>{selected && title === 'Users' ? <UserProfileDrawer user={selected} loading={detailLoading} actions={actions} onAction={actionClick} onClose={() => setSelected(null)} /> : selected ? <section className="glass card admin-drawer"><div className="section-header"><h2>{title} profile drawer</h2><button className="btn btn-secondary btn-sm" type="button" onClick={() => setSelected(null)}>Close</button></div><div className="admin-detail-grid">{(detailFields.length ? detailFields : columns).map((field) => <span key={field}><strong>{field}</strong>{displayValue(valueForPath(selected, field) ?? valueForPath(selected, field.toLowerCase().replaceAll(' ', '')))}</span>)}</div>{actions.length ? <div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => actionClick(action)} key={action}>{action}</button>)}</div> : null}</section> : null}{actions.length && !selected ? <section className="glass card"><h2 className="display-md">Actions</h2><div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => actionClick(action, null)} key={action}>{action}</button>)}</div></section> : null}</div>;
 }
 
 function UsersAdmin() {
-  return <AdminDataTable collectionKey="users" title="Users" description="Global user operations, trust, verification and marketplace ownership." searchPlaceholder="Search by handle, name, email, UID, phone or company" columns={['Profile photo', 'Handle', 'Display name', 'Trust Score', 'Joined', 'Followers', 'Following', 'Posts', 'Reports', 'Warnings', 'Suspensions', 'Verification', 'Marketplace ownership']} rowFields={['profilePhotoUrl', 'normalizedHandle', 'displayName', 'trustScore', 'createdAt', 'followerCount', 'followingCount', 'postCount', 'reportCount', 'warningCount', 'suspensionCount', 'verificationState', 'marketplaceOwnershipCount']} detailFields={['Profile photo', 'Banner', 'Handle', 'Display name', 'Bio', 'Verification', 'Trust Score', 'Followers', 'Following', 'Posts', 'Events', 'Marketplace activity', 'Warnings', 'Suspensions', 'Previous usernames', 'Handle ownership history', 'Sessions', 'Devices', 'Admin notes']} actions={['Suspend', 'Unsuspend', 'Ban', 'Delete account', 'Force logout', 'Reset password', 'Reset handle', 'Transfer handle', 'Message user', 'View reports']} />;
+  return <AdminDataTable collectionKey="users" title="Users" description="Global user operations, trust, verification and marketplace ownership." searchPlaceholder="Search by handle, name, email, UID, phone, business or company" columns={['Profile photo', 'Display name', 'Handle', 'UID', 'Email', 'Phone', 'Account type(s)', 'Sender', 'Rider', 'Portal', 'Business', 'Joined', 'Verification status', 'Trust score', 'Warnings', 'Reports', 'Suspensions', 'Marketplace ownership', 'Followers', 'Following', 'Posts', 'Events', 'Last active', 'Account status']} rowFields={['profilePhotoUrl', 'displayName', 'normalizedHandle', 'uid', 'email', 'phone', 'accountTypes', 'sender', 'rider', 'portal', 'business', 'createdAt', 'verificationState', 'trustScore', 'warningCount', 'reportCount', 'suspensionCount', 'marketplaceOwnershipCount', 'followerCount', 'followingCount', 'postCount', 'eventCount', 'lastActiveAt', 'accountStatus']} actions={['Suspend', 'Unsuspend', 'Ban', 'Delete account', 'Force logout', 'Reset password', 'Reset handle', 'Transfer handle', 'Message user', 'View reports']} />;
 }
 
 function ModerationAdmin() {

@@ -127,8 +127,8 @@ describe('Portal Admin authentication', () => {
       expect(adminSource).toContain(activity);
     }
     expect(adminSource).toContain('function UsersAdmin');
-    expect(adminSource).toContain('Search by handle, name, email, UID, phone or company');
-    expect(adminSource).toContain('Trust Score');
+    expect(adminSource).toContain('Search by handle, name, email, UID, phone, business or company');
+    expect(adminSource).toContain('Trust score');
     expect(adminSource).toContain('Force logout');
     expect(adminSource).toContain('function ModerationAdmin');
     expect(adminSource).toContain('Reported Posts');
@@ -183,7 +183,7 @@ describe('Portal Admin authentication', () => {
     expect(adminSource).toContain('Target content');
     expect(adminSource).toContain('Confidence indicators');
     expect(adminSource).toContain('Bulk moderation');
-    expect(adminSource).toContain('Search by handle, name, email, UID, phone or company');
+    expect(adminSource).toContain('Search by handle, name, email, UID, phone, business or company');
     expect(adminSource).toContain('Profile photo');
     expect(adminSource).toContain('Handle ownership history');
     expect(adminSource).toContain('Sessions');
@@ -261,15 +261,39 @@ describe('Portal Admin authentication', () => {
     const functions = readFileSync(resolve('functions/index.js'), 'utf8');
     expect(functions).toContain("requireAdminPermission(request, 'view_users')");
     expect(functions).toContain('export const searchPortalAdminUsers = onCall');
+    expect(functions).toContain('export const getPortalAdminUserRecord = onCall');
     expect(functions).toContain('export const managePortalAdminUser = onCall');
+    expect(functions).toContain('listAllAuthUsers');
+    expect(functions).toContain('getUserProfiles');
+    expect(functions).toContain('adminUserAggregates');
+    expect(functions).toContain("db.collection('handles')");
+    expect(functions).toContain("db.collection('handleListings')");
+    expect(functions).toContain("db.collection('handlePurchases')");
+    expect(functions).toContain("db.collection('posts')");
+    expect(functions).toContain("db.collection('postReplies')");
+    expect(functions).toContain("db.collection('events')");
+    expect(functions).toContain("db.collectionGroup('reports')");
     expect(functions).toContain("reset_password: 'reset_user_password'");
     expect(functions).toContain("transfer_handle: 'transfer_handle'");
     expect(functions).toContain("support: ['warn_user', 'force_logout', 'message_user', 'view_reports', 'view_audit_logs']");
     expect(service).toContain("callPortalIdentity('searchPortalAdminUsers'");
+    expect(service).toContain("callPortalIdentity('getPortalAdminUserRecord'");
     expect(service).toContain("callPortalIdentity('managePortalAdminUser'");
     expect(service).not.toContain("users: ['users', 'updatedAt']");
     expect(adminSource).toContain("key === 'users'");
+    expect(adminSource).toContain('function UserProfileDrawer');
+    for (const field of ['Profile photo', 'Display name', 'Handle', 'UID', 'Email', 'Phone', 'Account type(s)', 'Joined', 'Verification status', 'Trust score', 'Marketplace ownership', 'Last active', 'Account status']) {
+      expect(adminSource).toContain(field);
+    }
+    for (const section of ['Platform Membership', 'Trust', 'Marketplace', 'Portal', 'Circum', 'Audit history']) {
+      expect(adminSource).toContain(section);
+    }
+    expect(adminSource).toContain("return 'Not available'");
     expect(adminSource).toContain('Password reset link generated and copied.');
+    const audit = readFileSync(resolve('docs/admin-user-data-audit.md'), 'utf8');
+    expect(audit).toContain('Firebase Auth');
+    expect(audit).toContain('Sources not present in Portal production');
+    expect(audit).toContain('Firestore rules remain unchanged');
   });
 
   it('documents Admin V5 production readiness and launch blockers', () => {

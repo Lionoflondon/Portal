@@ -1164,7 +1164,15 @@ export const executePortalAdminAction = onCall(async (request) => {
   return { ok: true, auditId: auditRef.id, timelineId: timelineRef.id, approvalId: sensitive ? approvalRef.id : null, approvalStatus };
 });
 
-function adminUserResult(authUser, profile = {}) {
+function adminDate(value) {
+  const date = value?.toDate ? value.toDate() : value instanceof Date ? value : typeof value === 'string' ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString() : null;
+}
+
+function adminUserResult(authUser, profile = {}, aggregates = {}) {
+  const accountTypes = new Set(Array.isArray(profile.accountTypes) ? profile.accountTypes : []);
+  if (profile.accountType) accountTypes.add(profile.accountType);
+  accountTypes.add('Portal');
   return {
     id: authUser.uid,
     uid: authUser.uid,
@@ -1180,33 +1188,160 @@ function adminUserResult(authUser, profile = {}) {
     bio: profile.bio || null,
     verificationState: profile.verificationState || 'unverified',
     trustScore: profile.trustScore ?? null,
-    followerCount: profile.followerCount || 0,
-    followingCount: profile.followingCount || 0,
-    postCount: profile.postCount || 0,
-    reportCount: profile.reportCount || 0,
+    accountTypes: [...accountTypes],
+    sender: profile.sender === true ? 'Active' : null,
+    rider: profile.rider === true ? 'Active' : null,
+    portal: 'Active',
+    business: profile.business === true || profile.businessName || profile.company ? 'Active' : null,
+    businessName: profile.businessName || profile.company || null,
+    followerCount: profile.followerCount ?? aggregates.followerCount ?? null,
+    followingCount: profile.followingCount ?? aggregates.followingCount ?? null,
+    postCount: aggregates.postCount ?? profile.postCount ?? 0,
+    commentCount: aggregates.commentCount ?? profile.commentCount ?? 0,
+    eventCount: aggregates.eventCount ?? profile.eventCount ?? 0,
+    reportCount: aggregates.reportCount ?? profile.reportCount ?? 0,
     warningCount: profile.warningCount || 0,
     suspensionCount: profile.suspensionCount || 0,
     suspended: profile.suspended === true || authUser.disabled,
-    marketplaceOwnershipCount: profile.marketplaceOwnershipCount || 0,
-    createdAt: profile.createdAt || authUser.metadata.creationTime || null,
-    updatedAt: profile.updatedAt || null,
+    marketplaceOwnershipCount: aggregates.ownedHandleCount ?? profile.marketplaceOwnershipCount ?? 0,
+    marketplaceListingCount: aggregates.listingCount ?? 0,
+    marketplacePurchaseCount: aggregates.purchaseCount ?? 0,
+    accountStatus: authUser.disabled || profile.suspended === true ? 'Suspended' : 'Active',
+    providers: authUser.providerData.map((provider) => provider.providerId),
+    roles: authUser.customClaims?.portalAdminRoles || authUser.customClaims?.portalAdminRole || [],
+    createdAt: adminDate(profile.createdAt || authUser.metadata.creationTime),
+    updatedAt: adminDate(profile.updatedAt),
+    lastActiveAt: adminDate(profile.lastActiveAt || authUser.metadata.lastRefreshTime || authUser.metadata.lastSignInTime),
+    lastLoginAt: adminDate(authUser.metadata.lastSignInTime),
   };
+}
+
+async function listAllAuthUsers() {
+  const users = [];
+  let pageToken;
+  do {
+    const page = await getAuth().listUsers(1000, pageToken);
+    users.push(...page.users);
+    pageToken = page.pageToken;
+  } while (pageToken);
+  return users;
+}
+
+async function getUserProfiles(uids) {
+  const snapshots = [];
+  for (let index = 0; index < uids.length; index += 250) {
+    const references = uids.slice(index, index + 250).map((uid) => db.collection('users').doc(uid));
+    snapshots.push(...await db.getAll(...references));
+  }
+  return snapshots;
+}
+
+async function queryUserChunks(source, field, uids) {
+  const documents = [];
+  for (let index = 0; index < uids.length; index += 30) {
+    const snapshot = await source.where(field, 'in', uids.slice(index, index + 30)).get();
+    documents.push(...snapshot.docs);
+  }
+  return documents;
+}
+
+function countByUser(documents, field) {
+  return documents.reduce((counts, document) => {
+    const uid = document.data()?.[field];
+    if (uid) counts.set(uid, (counts.get(uid) || 0) + 1);
+    return counts;
+  }, new Map());
+}
+
+async function adminUserAggregates(uids) {
+  if (!uids.length) return new Map();
+  const [handlesByOwner, legacyHandles, listings, purchases, posts, comments, events, reports] = await Promise.all([
+    queryUserChunks(db.collection('handles'), 'ownerUid', uids),
+    queryUserChunks(db.collection('handles'), 'uid', uids),
+    queryUserChunks(db.collection('handleListings'), 'sellerUid', uids),
+    queryUserChunks(db.collection('handlePurchases'), 'uid', uids),
+    queryUserChunks(db.collection('posts'), 'authorUid', uids),
+    queryUserChunks(db.collection('postReplies'), 'authorUid', uids),
+    queryUserChunks(db.collection('events'), 'createdBy', uids),
+    queryUserChunks(db.collectionGroup('reports'), 'createdBy', uids),
+  ]);
+  const owned = new Map();
+  [...handlesByOwner, ...legacyHandles].forEach((document) => {
+    const uid = document.data().ownerUid || document.data().uid;
+    if (!uid) return;
+    const handles = owned.get(uid) || new Set(); handles.add(document.id); owned.set(uid, handles);
+  });
+  const maps = {
+    listingCount: countByUser(listings, 'sellerUid'), purchaseCount: countByUser(purchases, 'uid'),
+    postCount: countByUser(posts, 'authorUid'), commentCount: countByUser(comments, 'authorUid'),
+    eventCount: countByUser(events, 'createdBy'), reportCount: countByUser(reports, 'createdBy'),
+  };
+  return new Map(uids.map((uid) => [uid, {
+    ownedHandleCount: owned.get(uid)?.size || 0,
+    ...Object.fromEntries(Object.entries(maps).map(([key, counts]) => [key, counts.get(uid) || 0])),
+  }]));
 }
 
 export const searchPortalAdminUsers = onCall(async (request) => {
   requireAdminPermission(request, 'view_users');
   const search = String(request.data?.query || '').trim().toLowerCase().slice(0, 120);
-  const requestedLimit = Math.max(1, Math.min(100, Number(request.data?.limit || 50)));
-  const authPage = await getAuth().listUsers(1000);
-  const authUsers = authPage.users;
-  const profileSnapshots = authUsers.length ? await db.getAll(...authUsers.map((user) => db.collection('users').doc(user.uid))) : [];
+  const requestedLimit = Math.max(1, Math.min(1000, Number(request.data?.limit || 1000)));
+  const authUsers = await listAllAuthUsers();
+  const profileSnapshots = authUsers.length ? await getUserProfiles(authUsers.map((user) => user.uid)) : [];
   const profileByUid = new Map(profileSnapshots.map((snapshot) => [snapshot.id, snapshot.exists ? snapshot.data() : {}]));
-  const users = authUsers.map((authUser) => adminUserResult(authUser, profileByUid.get(authUser.uid))).filter((user) => {
+  const matchingAuthUsers = authUsers.filter((authUser) => {
     if (!search) return true;
-    return [user.uid, user.email, user.phone, user.displayName, user.handle, user.normalizedHandle]
+    const profile = profileByUid.get(authUser.uid) || {};
+    return [authUser.uid, authUser.email, authUser.phoneNumber, authUser.displayName, profile.displayName, profile.handle, profile.normalizedHandle, profile.businessName, profile.company]
       .some((value) => String(value || '').toLowerCase().includes(search));
   }).slice(0, requestedLimit);
-  return { users, nextPageToken: authPage.pageToken || null };
+  const aggregates = await adminUserAggregates(matchingAuthUsers.map((user) => user.uid));
+  const users = matchingAuthUsers.map((authUser) => adminUserResult(authUser, profileByUid.get(authUser.uid), aggregates.get(authUser.uid)));
+  return { users, totalUsers: authUsers.length, truncated: matchingAuthUsers.length < authUsers.length && !search };
+});
+
+export const getPortalAdminUserRecord = onCall(async (request) => {
+  requireAdminPermission(request, 'view_users');
+  const uid = String(request.data?.uid || '').trim();
+  if (!uid) throw new HttpsError('invalid-argument', 'Choose a Portal user.');
+  const [authUser, profileSnapshot, publicProfileSnapshot, aggregates, handlesByOwner, legacyHandles, listings, purchases, ownedTransfers, boughtTransfers, soldTransfers, auditLogs] = await Promise.all([
+    getAuth().getUser(uid),
+    db.collection('users').doc(uid).get(),
+    db.collection('publicProfiles').doc(uid).get(),
+    adminUserAggregates([uid]),
+    db.collection('handles').where('ownerUid', '==', uid).limit(50).get(),
+    db.collection('handles').where('uid', '==', uid).limit(50).get(),
+    db.collection('handleListings').where('sellerUid', '==', uid).limit(50).get(),
+    db.collection('handlePurchases').where('uid', '==', uid).limit(50).get(),
+    db.collection('handleTransfers').where('ownerUid', '==', uid).limit(50).get(),
+    db.collection('handleTransfers').where('buyerUid', '==', uid).limit(50).get(),
+    db.collection('handleTransfers').where('sellerUid', '==', uid).limit(50).get(),
+    db.collection('auditLogs').where('targetUid', '==', uid).limit(50).get(),
+  ]);
+  const profile = profileSnapshot.data() || {};
+  const publicProfile = publicProfileSnapshot.data() || {};
+  const ownedHandles = new Map([...handlesByOwner.docs, ...legacyHandles.docs].map((document) => [document.id, { id: document.id, status: document.data().status || null, type: document.data().marketplaceClass || document.data().handleType || null }]));
+  const transferHistory = new Map([...ownedTransfers.docs, ...boughtTransfers.docs, ...soldTransfers.docs].map((document) => [document.id, {
+    id: document.id, handle: document.data().normalizedHandle || document.data().handleId || null, type: document.data().type || 'marketplace_transfer', createdAt: adminDate(document.data().createdAt),
+  }]));
+  return {
+    user: {
+      ...adminUserResult(authUser, { ...publicProfile, ...profile }, aggregates.get(uid)),
+      profileExists: profileSnapshot.exists,
+      publicProfileExists: publicProfileSnapshot.exists,
+      memberships: { sender: null, rider: null, portal: profileSnapshot.exists ? 'Active' : null, business: profile.business === true || profile.businessName || profile.company ? 'Active' : null },
+      marketplace: {
+        ownedHandles: [...ownedHandles.values()],
+        listings: listings.docs.map((document) => ({ id: document.id, status: document.data().listingStatus || null, price: document.data().askingPriceAmount ?? null })),
+        purchases: purchases.docs.map((document) => ({ id: document.id, status: document.data().status || document.data().paymentStatus || null, handle: document.data().normalizedHandle || null })),
+        ownershipHistory: [...transferHistory.values()],
+      },
+      sessions: null,
+      devices: null,
+      circum: { deliveries: null, bookings: null, earnings: null, rothBalance: null },
+      auditHistory: auditLogs.docs.map((document) => ({ id: document.id, action: document.data().action || null, createdAt: adminDate(document.data().createdAt), actorUid: document.data().actorUid || null })),
+    },
+  };
 });
 
 export const managePortalAdminUser = onCall(async (request) => {
