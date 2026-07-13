@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+import { getAuth } from 'firebase-admin/auth';
 import { Buffer } from 'node:buffer';
 import { createHash, randomUUID } from 'node:crypto';
 import { onDocumentWritten } from 'firebase-functions/v2/firestore';
@@ -755,6 +756,14 @@ const ADMIN_ROLE_PERMISSIONS = {
   read_only_auditor: ['view_audit_logs', 'export_reports'],
 };
 
+const ADMIN_USER_ACTION_PERMISSIONS = {
+  suspend: 'suspend_user',
+  unsuspend: 'suspend_user',
+  force_logout: 'force_logout',
+  reset_password: 'reset_user_password',
+  transfer_handle: 'transfer_handle',
+};
+
 const ACTION_PERMISSION = {
   suspend: 'suspend_user',
   suspend_account: 'suspend_user',
@@ -1153,6 +1162,98 @@ export const executePortalAdminAction = onCall(async (request) => {
     transaction.set(idemRef, { adminUid, idempotencyKey, action, result: { ok: true, auditId: auditRef.id, timelineId: timelineRef.id, approvalId: sensitive ? approvalRef.id : null, approvalStatus }, createdAt: FieldValue.serverTimestamp() });
   });
   return { ok: true, auditId: auditRef.id, timelineId: timelineRef.id, approvalId: sensitive ? approvalRef.id : null, approvalStatus };
+});
+
+function adminUserResult(authUser, profile = {}) {
+  return {
+    id: authUser.uid,
+    uid: authUser.uid,
+    email: authUser.email || null,
+    phone: authUser.phoneNumber || null,
+    emailVerified: authUser.emailVerified,
+    disabled: authUser.disabled,
+    displayName: profile.displayName || authUser.displayName || null,
+    profilePhotoUrl: profile.profilePhotoUrl || authUser.photoURL || null,
+    bannerUrl: profile.bannerUrl || null,
+    normalizedHandle: profile.normalizedHandle || null,
+    handle: profile.handle || null,
+    bio: profile.bio || null,
+    verificationState: profile.verificationState || 'unverified',
+    trustScore: profile.trustScore ?? null,
+    followerCount: profile.followerCount || 0,
+    followingCount: profile.followingCount || 0,
+    postCount: profile.postCount || 0,
+    reportCount: profile.reportCount || 0,
+    warningCount: profile.warningCount || 0,
+    suspensionCount: profile.suspensionCount || 0,
+    suspended: profile.suspended === true || authUser.disabled,
+    marketplaceOwnershipCount: profile.marketplaceOwnershipCount || 0,
+    createdAt: profile.createdAt || authUser.metadata.creationTime || null,
+    updatedAt: profile.updatedAt || null,
+  };
+}
+
+export const searchPortalAdminUsers = onCall(async (request) => {
+  requireAdminPermission(request, 'view_users');
+  const search = String(request.data?.query || '').trim().toLowerCase().slice(0, 120);
+  const requestedLimit = Math.max(1, Math.min(100, Number(request.data?.limit || 50)));
+  const authPage = await getAuth().listUsers(1000);
+  const authUsers = authPage.users;
+  const profileSnapshots = authUsers.length ? await db.getAll(...authUsers.map((user) => db.collection('users').doc(user.uid))) : [];
+  const profileByUid = new Map(profileSnapshots.map((snapshot) => [snapshot.id, snapshot.exists ? snapshot.data() : {}]));
+  const users = authUsers.map((authUser) => adminUserResult(authUser, profileByUid.get(authUser.uid))).filter((user) => {
+    if (!search) return true;
+    return [user.uid, user.email, user.phone, user.displayName, user.handle, user.normalizedHandle]
+      .some((value) => String(value || '').toLowerCase().includes(search));
+  }).slice(0, requestedLimit);
+  return { users, nextPageToken: authPage.pageToken || null };
+});
+
+export const managePortalAdminUser = onCall(async (request) => {
+  const action = String(request.data?.action || '').trim().toLowerCase();
+  const permission = ADMIN_USER_ACTION_PERMISSIONS[action];
+  if (!permission) throw new HttpsError('invalid-argument', 'Choose a supported Portal user action.');
+  const adminUid = requireAdminPermission(request, permission);
+  const targetUid = String(request.data?.targetUid || '').trim();
+  const reason = String(request.data?.reason || '').trim().slice(0, 500);
+  if (!targetUid || reason.length < 4) throw new HttpsError('invalid-argument', 'A target user and reason are required.');
+  const targetAuth = await getAuth().getUser(targetUid);
+  const auditRef = db.collection('auditLogs').doc();
+  let result = { ok: true, action, targetUid };
+
+  if (action === 'suspend' || action === 'unsuspend') {
+    const disabled = action === 'suspend';
+    await getAuth().updateUser(targetUid, { disabled });
+    await db.collection('users').doc(targetUid).set({ suspended: disabled, suspensionUpdatedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  } else if (action === 'force_logout') {
+    await getAuth().revokeRefreshTokens(targetUid);
+  } else if (action === 'reset_password') {
+    if (!targetAuth.email) throw new HttpsError('failed-precondition', 'This user has no email address for password recovery.');
+    result = { ...result, passwordResetLink: await getAuth().generatePasswordResetLink(targetAuth.email) };
+  } else if (action === 'transfer_handle') {
+    const normalizedHandle = normalizeHandle(request.data?.normalizedHandle || '');
+    const recipientUid = String(request.data?.recipientUid || '').trim();
+    if (!normalizedHandle || !recipientUid || recipientUid === targetUid) throw new HttpsError('invalid-argument', 'A handle and different receiving UID are required.');
+    await getAuth().getUser(recipientUid);
+    const handleRef = db.collection('handles').doc(normalizedHandle);
+    const previousProfileRef = db.collection('users').doc(targetUid);
+    const recipientProfileRef = db.collection('users').doc(recipientUid);
+    const transferRef = db.collection('handleTransfers').doc();
+    await db.runTransaction(async (transaction) => {
+      const [handleSnapshot, previousProfileSnapshot] = await Promise.all([transaction.get(handleRef), transaction.get(previousProfileRef)]);
+      const handle = handleSnapshot.data() || {};
+      if (!handleSnapshot.exists || (handle.ownerUid || handle.uid) !== targetUid) throw new HttpsError('failed-precondition', 'The selected user does not own this handle.');
+      const originalHandle = handle.originalHandle || normalizedHandle;
+      transaction.set(handleRef, { ownerUid: recipientUid, uid: recipientUid, previousOwnerUid: targetUid, status: 'transferred', lastTransferredAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      if (previousProfileSnapshot.data()?.normalizedHandle === normalizedHandle) transaction.set(previousProfileRef, { handle: null, normalizedHandle: null, previousHandle: normalizedHandle, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(recipientProfileRef, { handle: originalHandle, normalizedHandle, handleChangedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      transaction.set(transferRef, { transferId: transferRef.id, type: 'admin_user_transfer', normalizedHandle, previousOwnerUid: targetUid, ownerUid: recipientUid, actingAdminUid: adminUid, reason, createdAt: FieldValue.serverTimestamp() });
+    });
+    result = { ...result, normalizedHandle, recipientUid };
+  }
+
+  await auditRef.set({ auditId: auditRef.id, system: 'portal_admin_users', action, actorUid: adminUid, targetUid, reason, permission, immutable: true, createdAt: FieldValue.serverTimestamp() });
+  return result;
 });
 
 export const getAdminHandleRecord = onCall(async (request) => {

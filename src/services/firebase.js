@@ -580,11 +580,12 @@ export function executePortalAdminAction(action, payload = {}) {
   const idempotencyKey = payload.idempotencyKey || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`);
   return callPortalIdentity('executePortalAdminAction', { action, idempotencyKey, ...payload });
 }
+export function searchPortalAdminUsers(query = '', max = 50) { return callPortalIdentity('searchPortalAdminUsers', { query, limit: max }); }
+export function managePortalAdminUser(action, payload = {}) { return callPortalIdentity('managePortalAdminUser', { action, ...payload }); }
 
 const adminCollectionConfig = {
   moderationReports: ['moderationReports', 'createdAt'],
   reports: ['reports', 'createdAt'],
-  users: ['users', 'updatedAt'],
   handles: ['handles', 'updatedAt'],
   handleListings: ['handleListings', 'updatedAt'],
   handleRequests: ['handleRequests', 'createdAt'],

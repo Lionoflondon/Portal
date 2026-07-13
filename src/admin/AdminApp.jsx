@@ -6,12 +6,14 @@ import {
   getPortalTokenClaims,
   hasFirebaseConfig,
   managePortalHandleRegistry,
+  managePortalAdminUser,
   observePortalAdminCollection,
   observeSession,
   observeVortexEntries,
   reclaimPortalHandle,
   refundPlaceholderPortalHandlePurchase,
   reviewPortalHandleRequest,
+  searchPortalAdminUsers,
   sendPortalPasswordReset,
   signInPortalUser,
   signInPortalUserWithGoogle,
@@ -63,12 +65,19 @@ function relativeTime(value) {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
-function useAdminCollection(key, max = 50) {
+function useAdminCollection(key, search = '', max = 50) {
   const [items, setItems] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     if (!hasFirebaseConfig) { setLoading(false); return undefined; }
+    if (key === 'users') {
+      setLoading(true);
+      const timer = window.setTimeout(() => {
+        searchPortalAdminUsers(search, max).then((result) => { setItems(result.users || []); setError(''); setLoading(false); }).catch((reason) => { setError(firebaseMessage(reason)); setLoading(false); });
+      }, 250);
+      return () => window.clearTimeout(timer);
+    }
     return observePortalAdminCollection(key, (snapshot) => {
       setItems(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
       setLoading(false);
@@ -77,7 +86,7 @@ function useAdminCollection(key, max = 50) {
       setError(firebaseMessage(reason));
       setLoading(false);
     }, max);
-  }, [key, max]);
+  }, [key, search, max]);
   return { items, error, loading };
 }
 
@@ -484,15 +493,31 @@ function AdminDashboard() {
 }
 
 function AdminDataTable({ title, description, searchPlaceholder, columns, rowFields = [], actions = [], queues = [], collectionKey, detailFields = [] }) {
-  const { items, error, loading } = useAdminCollection(collectionKey);
   const [term, setTerm] = useState('');
+  const { items, error, loading } = useAdminCollection(collectionKey, collectionKey === 'users' ? term : '');
   const [selected, setSelected] = useState(null);
   const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
   const filtered = items.filter((item) => JSON.stringify(item).toLowerCase().includes(term.toLowerCase()));
   async function actionClick(action, target = selected) {
     setNotice(''); setActionError('');
-    try { await runAdminAction(action.toLowerCase().replaceAll(' ', '_'), { entityType: title, targetId: target?.id || null, reason: 'admin_v4_privileged_action' }); setNotice(`${action} requested through callable function.`); } catch (reason) { setActionError(firebaseMessage(reason)); }
+    try {
+      const normalizedAction = action.toLowerCase().replaceAll(' ', '_');
+      if (title === 'Users' && target && ['suspend', 'unsuspend', 'force_logout', 'reset_password', 'transfer_handle'].includes(normalizedAction)) {
+        const payload = { targetUid: target.uid || target.id, reason: 'portal_owner_user_management' };
+        if (normalizedAction === 'transfer_handle') {
+          const recipientUid = window.prompt('Receiving Portal UID');
+          if (!recipientUid) return;
+          payload.recipientUid = recipientUid.trim();
+          payload.normalizedHandle = target.normalizedHandle;
+        }
+        const result = await managePortalAdminUser(normalizedAction, payload);
+        if (result.passwordResetLink) { await navigator.clipboard.writeText(result.passwordResetLink); setNotice('Password reset link generated and copied.'); }
+        else setNotice(`${action} completed through the Portal owner callable.`);
+        return;
+      }
+      await runAdminAction(normalizedAction, { entityType: title, targetId: target?.id || null, reason: 'admin_v4_privileged_action' }); setNotice(`${action} requested through callable function.`);
+    } catch (reason) { setActionError(firebaseMessage(reason)); }
   }
   return <div className="page admin-ops-page"><div><h1 className="display-xl">{title}</h1><p className="body-md">{description}</p></div>{title === 'Moderation' ? <section className="glass card"><h2 className="display-md">Moderator Productivity</h2><p className="body-sm">Saved filters, pinned queues, keyboard shortcuts, bulk actions, Quick approve, Quick remove, Quick suspend, context side panel, live updates and undo for reversible actions.</p></section> : null}{queues.length ? <div className="admin-queue-grid">{queues.map((queue) => <button className="glass card admin-queue-card" type="button" key={queue}><strong>{queue}</strong><span className="body-sm">{items.filter((item) => String(item.queue || item.category || item.type || '').toLowerCase().includes(queue.toLowerCase().split(' ')[0])).length} pending</span></button>)}</div> : null}<section className="glass card"><div className="section-header"><h2>{title} search</h2><span className="source-chip">Live Firestore read · Cloud Functions only · No direct client writes</span></div><label className="admin-search-field">Global search<input value={term} onChange={(event) => setTerm(event.target.value)} placeholder={searchPlaceholder} /></label>{error || actionError ? <p className="form-error" role="alert">{error || actionError}</p> : null}{notice ? <p className="form-notice" role="status">{notice}</p> : null}<div className="admin-table" role="table" aria-label={title}><div className="admin-table-row admin-table-head" role="row">{columns.map((column) => <span role="columnheader" key={column}>{column}</span>)}</div>{loading ? <div className="admin-table-row empty" role="row"><span role="cell">Loading live records...</span>{columns.slice(1).map((column) => <span role="cell" key={column}>—</span>)}</div> : filtered.length ? filtered.slice(0, 25).map((item) => <button className="admin-table-row clickable" role="row" type="button" onClick={() => setSelected(item)} key={item.id}>{columns.map((column, index) => <span role="cell" key={column}>{displayValue(valueForPath(item, rowFields[index] || column))}</span>)}</button>) : <div className="admin-table-row empty" role="row">{columns.map((column, index) => <span role="cell" key={column}>{index === 0 ? 'No matching live records' : '—'}</span>)}</div>}</div></section>{selected ? <section className="glass card admin-drawer"><div className="section-header"><h2>{title} profile drawer</h2><button className="btn btn-secondary btn-sm" type="button" onClick={() => setSelected(null)}>Close</button></div><div className="admin-detail-grid">{(detailFields.length ? detailFields : columns).map((field) => <span key={field}><strong>{field}</strong>{displayValue(valueForPath(selected, field) ?? valueForPath(selected, field.toLowerCase().replaceAll(' ', '')))}</span>)}</div>{actions.length ? <div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => actionClick(action)} key={action}>{action}</button>)}</div> : null}</section> : null}{actions.length && !selected ? <section className="glass card"><h2 className="display-md">Actions</h2><div className="admin-action-grid">{actions.map((action) => <button className="btn btn-secondary btn-sm" type="button" onClick={() => actionClick(action, null)} key={action}>{action}</button>)}</div></section> : null}</div>;
 }

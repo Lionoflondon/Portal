@@ -255,6 +255,23 @@ describe('Portal Admin authentication', () => {
     expect(service).toContain('adminExports');
   });
 
+  it('keeps Portal owner user management behind server RBAC callables', () => {
+    const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const functions = readFileSync(resolve('functions/index.js'), 'utf8');
+    expect(functions).toContain("requireAdminPermission(request, 'view_users')");
+    expect(functions).toContain('export const searchPortalAdminUsers = onCall');
+    expect(functions).toContain('export const managePortalAdminUser = onCall');
+    expect(functions).toContain("reset_password: 'reset_user_password'");
+    expect(functions).toContain("transfer_handle: 'transfer_handle'");
+    expect(functions).toContain("support: ['warn_user', 'force_logout', 'message_user', 'view_reports', 'view_audit_logs']");
+    expect(service).toContain("callPortalIdentity('searchPortalAdminUsers'");
+    expect(service).toContain("callPortalIdentity('managePortalAdminUser'");
+    expect(service).not.toContain("users: ['users', 'updatedAt']");
+    expect(adminSource).toContain("key === 'users'");
+    expect(adminSource).toContain('Password reset link generated and copied.');
+  });
+
   it('documents Admin V5 production readiness and launch blockers', () => {
     const report = readFileSync(resolve('docs/admin-production-readiness.md'), 'utf8');
     const script = readFileSync(resolve('scripts/admin-production-readiness-check.mjs'), 'utf8');
