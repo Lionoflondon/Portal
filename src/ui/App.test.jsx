@@ -116,10 +116,38 @@ describe('Portal app shell', () => {
     expect(formBlock).toContain('Private');
     expect(formBlock).toContain('Vortex story hint');
     expect(formBlock).toContain('This never merges Event ownership, media, comments or URLs.');
-    expect(styles).toContain('.event-masonry{column-count:5');
-    expect(styles).toContain('@media (min-width:1500px){.event-masonry{column-count:6}}');
-    expect(styles).toContain('@media (max-width:640px){.event-masonry{column-count:2');
-    expect(styles).toContain('break-inside:avoid');
+    expect(formBlock).toContain("eventReaches.map((reach)");
+    expect(source).toContain("const eventReaches = ['Random', 'Local', 'Citywide', 'National', 'Global']");
+    expect(source).toContain("const value = event.reach || event.reachClassification || 'Random'");
+    expect(source).toContain('function useEventMasonryColumns()');
+    expect(source).toContain("if (window.innerWidth < 680) return 1");
+    expect(source).toContain("if (window.innerWidth >= 2200) return 5");
+    expect(source).toContain('return 4;');
+    expect(source).toContain('candidate.weight < shortest.weight');
+    expect(styles).toContain('.events-canvas{position:relative;isolation:isolate;width:100%;max-width:none');
+    expect(styles).toContain('grid-template-columns:repeat(var(--event-columns,4),minmax(0,1fr))');
+    expect(styles).toContain('@media (max-width:679px)');
+    expect(styles).toContain('.event-masonry{grid-template-columns:1fr');
+    expect(styles).toContain('.masonry-event-card:hover{transform:translateY(-5px)');
+  });
+
+  it('keeps Events reach, status and public intelligence distinct', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const eventCardBlock = source.match(/function EventCard\([\s\S]*?\n}\n\nfunction EventCollection/)?.[0] || '';
+    const eventsBlock = source.match(/function Events\([\s\S]*?\n}\n\nfunction EventDetail/)?.[0] || '';
+    expect(source).not.toContain('LIVE LEDGER');
+    expect(eventsBlock).toContain('Create event');
+    expect(eventCardBlock).toContain('event-status');
+    expect(eventCardBlock).toContain('event-reach');
+    expect(eventCardBlock).toContain('Pulse Strength');
+    expect(eventCardBlock).not.toContain('AI confidence');
+    expect(eventCardBlock).toContain('Updated {timing.updated}');
+    expect(eventCardBlock).toContain('Started {timing.started}');
+    expect(eventCardBlock).toContain('reports');
+    expect(eventCardBlock).toContain('contributors');
+    expect(source).toContain('function canonicalEvents(events = [])');
+    expect(styles).toContain('.masonry-event-card.reach-global::before');
   });
 
   it('keeps Events independent and moves clustering into Vortex story graphs', () => {

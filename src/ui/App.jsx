@@ -166,6 +166,7 @@ export const EVENTS_UNAVAILABLE_MESSAGE = 'Events are temporarily unavailable. P
 export const PROFILE_HANDLE_PLACEHOLDER = 'Choose your unique handle';
 const eventRegions = ['World', 'Nearby', 'United Kingdom', 'Europe', 'Africa', 'Americas', 'Asia'];
 const eventCategories = ['All', ...eventTypes];
+const eventReaches = ['Random', 'Local', 'Citywide', 'National', 'Global'];
 const contributionTabs = ['Overview', 'Timeline', 'Updates', 'Photos', 'Videos', 'Discussion', 'Reports', 'Sources', 'Contributors', 'Related Events'];
 
 function Brand() { return <a href="#/" className="brand" aria-label="Portal home"><span className="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="#fff" strokeWidth="2" strokeLinecap="round" /><circle cx="12" cy="12" r="4" stroke="#fff" strokeWidth="2" /></svg></span><span className="brand-name desktop-only">Portal</span></a>; }
@@ -184,9 +185,57 @@ function ErrorState({ message }) { return <div className="glass card empty-state
 function eventIsGathering(event = {}) {
   return ['Public Event', 'Community', 'Sport', 'Entertainment', 'Business', 'Education'].includes(event.eventType || event.category);
 }
-function eventDisplayTime(event = {}) {
-  if (event.status === 'Upcoming' && (event.date || event.time)) return event.time ? `Today ${event.time}` : event.date;
-  return relativeTime(event.lastMeaningfulUpdateAt || event.updatedAt || event.startTime || event.createdAt);
+function eventReach(event = {}) {
+  const value = event.reach || event.reachClassification || 'Random';
+  return eventReaches.includes(value) ? value : 'Random';
+}
+function eventPulse(event = {}) {
+  return Math.max(0, Math.min(100, Number(event.pulseStrength ?? event.activityScore ?? 0)));
+}
+function eventMovement(event = {}) {
+  if (['Resolved', 'Historic', 'Archived'].includes(event.status)) return 'Resolved';
+  const movement = String(event.movement || event.activityMovement || '').toLowerCase();
+  if (movement.includes('rapid') || movement.includes('accelerat')) return 'Rapidly changing';
+  if (movement.includes('escalat')) return 'Escalating';
+  if (movement.includes('stable')) return 'Stable';
+  if (movement.includes('quiet') || movement.includes('cool')) return 'Quiet';
+  return eventPulse(event) >= 60 ? 'Active' : 'Stable';
+}
+function eventTimeParts(event = {}) {
+  return {
+    updated: relativeTime(event.lastMeaningfulUpdateAt || event.updatedAt || event.createdAt),
+    started: relativeTime(event.startTime || event.eventTime || event.createdAt),
+  };
+}
+function canonicalEvents(events = []) {
+  const seen = new Set();
+  return events.filter((event) => {
+    const key = event.canonicalEventId || event.id;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+function eventCardWeight(event = {}) {
+  const mediaWeight = event.heroImageUrl || event.mediaPreview?.url || event.photos?.length ? 230 : 150;
+  return mediaWeight + Math.min(150, String(event.summary || '').length * .45) + Math.min(70, String(event.title || '').length * .5);
+}
+function useEventMasonryColumns() {
+  const getCount = () => {
+    if (typeof window === 'undefined') return 4;
+    if (window.innerWidth < 680) return 1;
+    if (window.innerWidth < 980) return 2;
+    if (window.innerWidth < 1320) return 3;
+    if (window.innerWidth >= 2200) return 5;
+    return 4;
+  };
+  const [count, setCount] = useState(getCount);
+  useEffect(() => {
+    const resize = () => setCount(getCount());
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  return count;
 }
 function EventCard({ event, follow, onFollow }) {
   const location = event.locationSummary || event.primaryLocation || event.venue || event.region || 'World';
@@ -194,14 +243,21 @@ function EventCard({ event, follow, onFollow }) {
   const status = event.archived ? 'Archived' : event.status || 'Developing';
   const gathering = eventIsGathering(event);
   const hero = event.heroImageUrl || event.mediaPreview?.url || event.photos?.[0]?.url || '';
-  return <article className={`glass interactive event-card masonry-event-card event-variant-${String(event.id || '').charCodeAt(0) % 4 || 0}`}><a className="event-media" href={`#/events/${event.id}`} style={hero ? { backgroundImage: `linear-gradient(180deg, rgba(7,9,15,.04), rgba(7,9,15,.62)), url(${hero})` } : undefined} aria-label={event.title}>{event.video?.thumbnailUrl ? <span className="source-chip">Video</span> : null}</a><div className="masonry-event-content"><div className="inline-meta"><span className={`event-status ${status.toLowerCase()}`}>{status}</span><span className="source-chip">{event.eventType || event.category || 'Other'}</span></div><a href={`#/events/${event.id}`}><strong>{event.title}</strong></a>{event.summary ? <p className="body-sm">{event.summary}</p> : null}<div className="event-essential-meta"><span>{location}</span><span>{eventDisplayTime(event)}</span><span>{actor}</span></div><div className="event-card-counts"><span>{event.followerCount || 0} {gathering ? 'interested' : 'following'}</span><span>{event.updateCount || event.timelineCount || 0} updates</span>{gathering ? <span>{event.goingCount || 0} going</span> : null}</div><div className="event-card-actions compact"><button className="btn btn-primary btn-sm" type="button" onClick={() => onFollow?.(event.id, !follow)}>{follow ? 'Following' : gathering ? 'Interested' : 'Follow'}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/#/events/${event.id}`).catch(() => {})}>Share</button></div></div></article>;
+  const reach = eventReach(event); const pulse = eventPulse(event); const timing = eventTimeParts(event);
+  return <article className={`glass interactive event-card masonry-event-card reach-${reach.toLowerCase()} event-variant-${String(event.id || '').charCodeAt(0) % 4 || 0}`}><a className="event-media" href={`#/events/${event.id}`} style={hero ? { backgroundImage: `linear-gradient(180deg, rgba(7,9,15,.04), rgba(7,9,15,.72)), url(${hero})` } : undefined} aria-label={event.title}>{event.video?.thumbnailUrl ? <span className="source-chip">Video</span> : null}</a><div className="masonry-event-content"><div className="event-card-topline"><span className={`event-status ${status.toLowerCase()}`}>{status}</span><span className={`event-reach reach-${reach.toLowerCase()}`}>{reach}</span></div><div className="event-sector">{event.eventType || event.category || 'Other'}</div><a href={`#/events/${event.id}`}><strong>{event.title}</strong></a>{event.summary ? <p className="body-sm">{event.summary}</p> : null}<div className="event-essential-meta"><span>{location}</span><span>{actor}</span></div><div className="event-timing"><span>Updated {timing.updated}</span><span>Started {timing.started}</span></div><div className="event-intelligence"><span><b>Pulse Strength</b> {pulse}</span><span>{eventMovement(event)}</span></div><div className="event-card-counts"><span>{event.followerCount || event.interestedCount || 0} {gathering ? 'interested' : 'following'}</span><span>{event.reportCount || 0} reports</span><span>{event.mediaCount || event.photos?.length || 0} media</span><span>{event.contributorCount || 0} contributors</span><span>{event.relatedEventIds?.length || event.storyGraphEventIds?.length || 0} connected</span><span>{event.updateCount || event.timelineCount || 0} updates</span></div><div className="event-card-actions compact"><button className="btn btn-primary btn-sm" type="button" onClick={() => onFollow?.(event.id, !follow)}>{follow ? 'Following' : gathering ? 'Interested' : 'Follow'}</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/#/events/${event.id}`).catch(() => {})}>Share</button></div></div></article>;
 }
 
 function EventCollection({ events, loading, error, empty, onFollow, following = new Set() }) {
+  const columnCount = useEventMasonryColumns();
   if (loading) return <div className="event-masonry skeleton-masonry">{Array.from({ length: 8 }).map((_, index) => <div className="glass card event-skeleton" key={index} />)}</div>;
   if (error) return <ErrorState message={error} />;
+  const columns = Array.from({ length: columnCount }, () => ({ weight: 0, events: [] }));
+  canonicalEvents(events).forEach((event) => {
+    const column = columns.reduce((shortest, candidate) => candidate.weight < shortest.weight ? candidate : shortest, columns[0]);
+    column.events.push(event); column.weight += eventCardWeight(event) + 20;
+  });
   if (!events.length) return <div className="glass card empty-state"><h2 className="display-md">{empty}</h2><p className="body-sm">When something happens, Portal will give it a place in the world timeline.</p></div>;
-  return <div className="event-masonry" aria-label="Masonry event discovery grid">{events.map((event) => <EventCard key={event.id} event={event} follow={following.has(event.id)} onFollow={onFollow} />)}</div>;
+  return <div className="event-masonry" style={{ '--event-columns': columnCount }} aria-label="Masonry event discovery grid">{columns.map((column, index) => <div className="event-masonry-column" key={`event-column-${index}`}>{column.events.map((event) => <EventCard key={event.id} event={event} follow={following.has(event.id)} onFollow={onFollow} />)}</div>)}</div>;
 }
 
 function PostMedia({ post }) {
@@ -357,11 +413,11 @@ function PostDetail({ postId, user, echoed, liked, bookmarked, onEcho, onQuote, 
 }
 
 function EventForm({ initial, events, onSubmit, onCancel, busy }) {
-  const [values, setValues] = useState(initial || { title: '', description: '', summary: '', eventType: 'Live Incident', status: 'Live', location: '', automaticGps: false, date: '', time: '', visibility: 'public', parentEventId: '' });
+  const [values, setValues] = useState(initial || { title: '', description: '', summary: '', eventType: 'Live Incident', status: 'Live', reach: 'Random', location: '', automaticGps: false, date: '', time: '', visibility: 'public', parentEventId: '' });
   const [error, setError] = useState('');
   function update(field, value) { setValues((current) => ({ ...current, [field]: value })); }
   function submit(event) { event.preventDefault(); if (values.title.trim().length < 3 || (values.description || values.summary || '').trim().length < 12) { setError('Say what is happening in a clear title and description.'); return; } onSubmit({ ...values, summary: values.summary || values.description }); }
-  return <form className="form-stack event-create-form" onSubmit={submit}><label>Title<input value={values.title} onChange={(event) => update('title', event.target.value)} maxLength="120" required placeholder="What is happening?" /></label><label>Description<textarea value={values.description || values.summary || ''} onChange={(event) => update('description', event.target.value)} maxLength="1000" required /></label><div className="form-grid"><label>Photos<input type="file" accept="image/*" multiple disabled title="Event media upload is coming through Updates." /></label><label>Videos<input type="file" accept="video/*" disabled title="Event media upload is coming through Updates." /></label></div><div className="form-grid"><label>Location<input value={values.location || values.locationSummary || ''} onChange={(event) => update('location', event.target.value)} maxLength="180" placeholder="Place, area or venue" /></label><label className="check-row"><input type="checkbox" checked={Boolean(values.automaticGps)} onChange={(event) => update('automaticGps', event.target.checked)} /> Automatic GPS</label></div><div className="form-grid"><label>Date<input type="date" value={values.date || ''} onChange={(event) => update('date', event.target.value)} /></label><label>Time<input type="time" value={values.time || ''} onChange={(event) => update('time', event.target.value)} /></label></div><div className="form-grid"><label>Category<select value={values.eventType || values.category || 'Other'} onChange={(event) => { update('eventType', event.target.value); update('category', event.target.value); }}>{eventTypes.map((type) => <option key={type}>{type}</option>)}</select></label><label>Status<select value={values.status} onChange={(event) => update('status', event.target.value)}>{eventStatuses.map((status) => <option key={status}>{status}</option>)}</select></label></div><label>Visibility<select value={values.visibility || 'public'} onChange={(event) => update('visibility', event.target.value)}><option value="public">Public</option><option value="followers">Followers</option><option value="private">Private</option></select></label><label>Vortex story hint<select value={values.parentEventId || ''} onChange={(event) => update('parentEventId', event.target.value)}><option value="">No story hint</option>{events.filter((event) => event.id !== initial?.id).map((event) => <option value={event.id} key={event.id}>{event.title}</option>)}</select></label><p className="body-sm">Vortex may cluster related Events into one story graph. This never merges Event ownership, media, comments or URLs.</p>{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="form-actions"><button className="btn btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Create event'}</button>{onCancel ? <button className="btn btn-secondary" type="button" onClick={onCancel}>Cancel</button> : null}</div></form>;
+  return <form className="form-stack event-create-form" onSubmit={submit}><label>Title<input value={values.title} onChange={(event) => update('title', event.target.value)} maxLength="120" required placeholder="What is happening?" /></label><label>Description<textarea value={values.description || values.summary || ''} onChange={(event) => update('description', event.target.value)} maxLength="1000" required /></label><div className="form-grid"><label>Photos<input type="file" accept="image/*" multiple disabled title="Event media upload is coming through Updates." /></label><label>Videos<input type="file" accept="video/*" disabled title="Event media upload is coming through Updates." /></label></div><div className="form-grid"><label>Location<input value={values.location || values.locationSummary || ''} onChange={(event) => update('location', event.target.value)} maxLength="180" placeholder="Place, area or venue" /></label><label className="check-row"><input type="checkbox" checked={Boolean(values.automaticGps)} onChange={(event) => update('automaticGps', event.target.checked)} /> Automatic GPS</label></div><div className="form-grid"><label>Date<input type="date" value={values.date || ''} onChange={(event) => update('date', event.target.value)} /></label><label>Time<input type="time" value={values.time || ''} onChange={(event) => update('time', event.target.value)} /></label></div><div className="form-grid"><label>Category<select value={values.eventType || values.category || 'Other'} onChange={(event) => { update('eventType', event.target.value); update('category', event.target.value); }}>{eventTypes.map((type) => <option key={type}>{type}</option>)}</select></label><label>Status<select value={values.status} onChange={(event) => update('status', event.target.value)}>{eventStatuses.map((status) => <option key={status}>{status}</option>)}</select></label></div><div className="form-grid"><label>Reach<select value={values.reach || 'Random'} onChange={(event) => update('reach', event.target.value)}>{eventReaches.map((reach) => <option key={reach}>{reach}</option>)}</select></label><label>Visibility<select value={values.visibility || 'public'} onChange={(event) => update('visibility', event.target.value)}><option value="public">Public</option><option value="followers">Followers</option><option value="private">Private</option></select></label></div><label>Vortex story hint<select value={values.parentEventId || ''} onChange={(event) => update('parentEventId', event.target.value)}><option value="">No story hint</option>{events.filter((event) => event.id !== initial?.id).map((event) => <option value={event.id} key={event.id}>{event.title}</option>)}</select></label><p className="body-sm">Vortex may cluster related Events into one story graph. This never merges Event ownership, media, comments or URLs.</p>{error ? <p className="form-error" role="alert">{error}</p> : null}<div className="form-actions"><button className="btn btn-primary" disabled={busy}>{busy ? 'Saving...' : 'Create event'}</button>{onCancel ? <button className="btn btn-secondary" type="button" onClick={onCancel}>Cancel</button> : null}</div></form>;
 }
 
 function Events({ user, eventState, onFollow, following, onCreate }) {
@@ -379,7 +435,7 @@ function Events({ user, eventState, onFollow, following, onCreate }) {
     if (filter === 'Archived') return status === 'Archived' || status === 'Resolved';
     return true;
   });
-  return <div className="page events-page"><div className="welcome-head"><div><h1 className="display-xl">What is happening?</h1><p className="body-md">Portal Events is the world&apos;s timeline: incidents, culture, sport, weather, government, community and everything unfolding around us.</p></div><button type="button" className="btn btn-primary" onClick={onCreate}>Create event</button></div><div className="event-discovery-controls glass card"><div><span className="eyebrow">Discovery</span><div className="chip-row">{['Nearby', 'Live', 'Breaking', 'Today', 'Upcoming', 'Following', 'Trending', 'Archived'].map((item) => <button type="button" className={`chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div></div><div><span className="eyebrow">Region</span><div className="chip-row">{eventRegions.map((item) => <button type="button" className={`chip ${region === item ? 'active' : ''}`} onClick={() => setRegion(item)} key={item}>{item}</button>)}</div></div><div><span className="eyebrow">Type</span><div className="chip-row">{eventCategories.map((item) => <button type="button" className={`chip ${category === item ? 'active' : ''}`} onClick={() => setCategory(item)} key={item}>{item}</button>)}</div></div></div><Section title="Happening now"><EventCollection events={filtered} loading={eventState.loading} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="Nothing matching this view yet" onFollow={onFollow} following={following} /></Section><p className="body-sm">Signed in as {user.email}</p></div>;
+  return <div className="page events-page events-canvas"><div className="events-atmosphere" aria-hidden="true" /><div className="welcome-head events-heading"><div><h1 className="display-xl">What is happening?</h1><p className="body-md">Portal Events is the world&apos;s timeline: incidents, culture, sport, weather, government, community and everything unfolding around us.</p></div><button type="button" className="btn btn-primary" onClick={onCreate}>Create event</button></div><div className="event-discovery-controls"><div><span className="eyebrow">Status</span><div className="chip-row">{['Nearby', 'Live', 'Breaking', 'Today', 'Upcoming', 'Following', 'Trending', 'Archived'].map((item) => <button type="button" className={`chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div></div><div><span className="eyebrow">Region</span><div className="chip-row">{eventRegions.map((item) => <button type="button" className={`chip ${region === item ? 'active' : ''}`} onClick={() => setRegion(item)} key={item}>{item}</button>)}</div></div><div><span className="eyebrow">Sector</span><div className="chip-row">{eventCategories.map((item) => <button type="button" className={`chip ${category === item ? 'active' : ''}`} onClick={() => setCategory(item)} key={item}>{item}</button>)}</div></div></div><Section title="Happening now"><EventCollection events={filtered} loading={eventState.loading} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="Nothing matching this view yet" onFollow={onFollow} following={following} /></Section><p className="body-sm events-session">Signed in as {user.email}</p></div>;
 }
 
 function EventDetail({ eventId, user, events, onFollow, following }) {
