@@ -429,6 +429,7 @@ describe('Portal app shell', () => {
   it('routes every public profile trigger through the canonical handle profile screen', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const functions = readFileSync(resolve('functions/index.js'), 'utf8');
     const postCardBlock = source.match(/function PostCard\([\s\S]*?\n}\n\nfunction Home/)?.[0] || '';
     const homeBlock = source.match(/function Home\([\s\S]*?\n}\n\nfunction PostComposer/)?.[0] || '';
     const detailBlock = source.match(/function PostDetail\([\s\S]*?\n}\n\nfunction EventForm/)?.[0] || '';
@@ -463,10 +464,26 @@ describe('Portal app shell', () => {
     expect(publicProfileBlock).toContain('Report User');
     expect(publicProfileBlock).toContain('Block User');
     expect(publicProfileBlock).toContain('Mute User');
+    expect(publicProfileBlock).toContain('togglePortalProfileFollow(profile.uid, next)');
+    expect(publicProfileBlock).toContain('setFollowing(data.isFollowing === true)');
+    expect(publicProfileBlock).toContain('Back to my profile');
+    expect(publicProfileBlock).toContain('href="#/profile"');
+    expect(publicProfileBlock).toContain('aria-pressed={following}');
     expect(publicProfileBlock).not.toContain('email');
     expect(publicProfileBlock).not.toContain('admin');
     expect(service).toContain('searchPortalProfiles(term)');
     expect(service).toContain('data.profiles || data || []');
+    expect(service).toContain("callPortalIdentity('togglePortalProfileFollow'");
+    expect(service).toContain('ensurePortalUserProfile(user)');
+    expect(source).toContain('await ensurePortalUserProfile(nextUser)');
+    expect(functions).toContain('export const togglePortalProfileFollow = onCall');
+    expect(functions).toContain("collection('following').doc(targetUid)");
+    expect(functions).toContain("collection('followers').doc(followerUid)");
+    expect(functions).toContain('if (active === shouldFollow)');
+    expect(functions).toContain('followerCount');
+    expect(functions).toContain('followingCount');
+    expect(functions).toContain('resolvePortalIdentity');
+    expect(source).toContain("hashRoute && hashRoute !== '/' ? hashRoute");
   });
 
   it('uses complete public Notification Centre filters without changing backend notification types', () => {

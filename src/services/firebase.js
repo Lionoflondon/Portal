@@ -76,6 +76,20 @@ export async function registerPortalUser({ displayName, email, password }) {
   return credential.user;
 }
 
+export async function ensurePortalUserProfile(user) {
+  if (!user?.uid) return;
+  const reference = doc(requireService(portalDb, 'Firestore'), 'users', user.uid);
+  const existing = await getDoc(reference);
+  if (existing.exists()) return;
+  await setDoc(reference, {
+    displayName: user.displayName || '',
+    email: user.email || '',
+    preferences: { emailUpdates: true },
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export function signInPortalUser(email, password) {
   return signInWithEmailAndPassword(requireService(portalAuth, 'Authentication'), email, password);
 }
@@ -548,6 +562,7 @@ function callPortalIdentity(name, payload) {
 }
 
 export function checkPortalHandle(handle) { return callPortalIdentity('checkHandleAvailability', { handle }); }
+export function togglePortalProfileFollow(targetUid, following) { return callPortalIdentity('togglePortalProfileFollow', { targetUid, following }); }
 export function reservePortalHandle(handle, profile) { return callPortalIdentity('reserveHandle', { handle, ...(profile ? { profile } : {}) }); }
 export function changePortalHandle(handle) { return callPortalIdentity('changeHandle', { handle }); }
 export function resolvePortalHandle(handle) { return callPortalIdentity('resolveHandle', { handle }); }

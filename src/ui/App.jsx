@@ -15,6 +15,7 @@ import {
   createPortalPostReply,
   deletePortalPost,
   echoPortalPost,
+  ensurePortalUserProfile,
   hasFirebaseConfig,
   deleteOwnPortalMessage,
   markAllPortalNotificationsRead,
@@ -61,6 +62,7 @@ import {
   startPortalHandlePurchase,
   submitPortalHandleOffer,
   submitPortalEventContribution,
+  togglePortalProfileFollow,
   togglePortalPostBookmark,
   togglePortalPostLike,
   updatePortalEvent,
@@ -816,14 +818,14 @@ function CreateModal({ open, onClose, user, events }) {
   return <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="createModalTitle" onMouseDown={onClose}><div className="modal form-modal report-modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><div><h2 id="createModalTitle">Create event</h2><p className="body-sm">What is happening?</p></div><button className="modal-close" type="button" onClick={onClose} aria-label="Close">×</button></div>{error ? <p className="form-error" role="alert">{error}</p> : null}<EventForm events={events} onSubmit={submit} onCancel={onClose} busy={busy} /></div></div>;
 }
 
-function PublicProfile({ handle }) {
+function PublicProfile({ handle, user }) {
   const normalizedHandle = cleanHandle(handle);
-  const [profile, setProfile] = useState(null); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [following, setFollowing] = useState(false);
+  const [profile, setProfile] = useState(null); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [following, setFollowing] = useState(false); const [followBusy, setFollowBusy] = useState(false);
   useEffect(() => {
     let cancelled = false;
     setProfile(null); setError(''); setNotice('');
     if (!normalizedHandle) { setError('Profile not found'); return undefined; }
-    resolvePortalHandle(normalizedHandle).then((data) => { if (!cancelled) setProfile(data); }).catch(() => { if (!cancelled) setError('Profile not found'); });
+    resolvePortalHandle(normalizedHandle).then((data) => { if (!cancelled) { setProfile(data); setFollowing(data.isFollowing === true); } }).catch(() => { if (!cancelled) setError('Profile not found'); });
     return () => { cancelled = true; };
   }, [normalizedHandle]);
   async function copyProfileLink() {
@@ -832,6 +834,23 @@ function PublicProfile({ handle }) {
   async function shareProfile() {
     const url = publicProfileUrl(profile?.handle || normalizedHandle);
     try { if (navigator.share) await navigator.share({ title: profile?.displayName || `@${normalizedHandle}`, url }); else await copyProfileLink(); } catch { /* sharing can be cancelled */ }
+  }
+  async function changeFollow() {
+    if (!user || !profile?.uid || followBusy || profile.uid === user.uid) return;
+    const previous = following;
+    const next = !previous;
+    setFollowing(next);
+    setProfile((current) => ({ ...current, followerCount: Math.max(0, Number(current?.followerCount || 0) + (next ? 1 : -1)) }));
+    setFollowBusy(true); setNotice('');
+    try {
+      const result = await togglePortalProfileFollow(profile.uid, next);
+      setFollowing(result.following === true);
+      setProfile((current) => ({ ...current, followerCount: result.followerCount }));
+    } catch (reason) {
+      setFollowing(previous);
+      setProfile((current) => ({ ...current, followerCount: Math.max(0, Number(current?.followerCount || 0) + (next ? -1 : 1)) }));
+      setNotice(firebaseMessage(reason));
+    } finally { setFollowBusy(false); }
   }
   if (error) return <main className="auth-shell"><section className="glass card empty-state"><h1 className="display-lg">Profile not found</h1><p className="body-sm">This Portal identity is missing, invalid, deleted or not public.</p><a className="btn btn-primary" href="#/">Return Home</a></section></main>;
   if (!profile) return <main className="auth-shell"><Loading label="Finding this Portal identity..." /></main>;
@@ -848,14 +867,14 @@ function PublicProfile({ handle }) {
     ['Events', profile.eventCount || 0],
     ['Shared reports', profile.reportCount || 0]
   ];
-  return <main className="public-profile"><Brand /><div className="page public-profile-page"><div className="profile-cover" style={profile.bannerUrl ? { backgroundImage: `linear-gradient(180deg, rgba(7,9,15,.08), rgba(7,9,15,.48)), url(${profile.bannerUrl})` } : undefined} aria-hidden="true" /><section className="glass card personal-profile-card">{profile.profilePhotoUrl ? <img className="profile-photo-lg" src={profile.profilePhotoUrl} alt="" /> : <Avatar size="lg">{initials(displayName)}</Avatar>}<div className="personal-profile-main"><div><h1 className="display-xl">{displayName}</h1><p className="profile-handle">@{profileHandle}</p>{profile.verificationState === 'verified' ? <span className="source-chip">Verified</span> : null}</div><div className="form-actions"><button className={`btn btn-${following ? 'secondary' : 'primary'} btn-sm`} type="button" onClick={() => setFollowing((value) => !value)}>{following ? 'Following' : 'Follow'}</button><a className="btn btn-secondary btn-sm" href="#/messages">Message</a><button className="btn btn-secondary btn-sm" type="button" onClick={shareProfile}>Share Profile</button><button className="btn btn-secondary btn-sm" type="button" onClick={copyProfileLink}>Copy Profile Link</button></div></div>{profile.bio ? <p className="body-md">{profile.bio}</p> : <p className="body-sm">No public bio yet.</p>}<div className="profile-details">{profile.location ? <span>{profile.location}</span> : null}{profile.website ? <a href={profile.website} target="_blank" rel="noreferrer">{profile.website.replace(/^https?:\/\//, '')}</a> : null}<span>Joined {relativeTime(joined)}</span></div>{notice ? <p className="form-notice" role="status">{notice}</p> : null}</section><section className="metrics public-profile-stats">{stats.map(([label, value]) => <span key={label}><strong>{formatViewCount(value)}</strong> {label}</span>)}</section><Section title="Public activity"><div className="profile-tabs">{['Posts', 'Replies', 'Echoes', 'Media', 'Likes', 'Events', 'Shared reports'].map((item) => <button className="profile-tab" type="button" key={item}>{item}</button>)}</div><div className="glass card compact-empty"><p className="body-sm">Public activity for @{profileHandle} appears here when available.</p></div></Section><Section title="Profile actions"><div className="form-actions"><button className="btn btn-secondary btn-sm" type="button" onClick={() => setNotice('Report received for review.')}>Report User</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setNotice('User blocked on this device for now.')}>Block User</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setNotice('User muted on this device for now.')}>Mute User</button></div></Section></div></main>;
+  return <main className="public-profile"><Brand /><div className="page public-profile-page"><div className="profile-cover" style={profile.bannerUrl ? { backgroundImage: `linear-gradient(180deg, rgba(7,9,15,.08), rgba(7,9,15,.48)), url(${profile.bannerUrl})` } : undefined} aria-hidden="true" /><section className="glass card personal-profile-card">{profile.profilePhotoUrl ? <img className="profile-photo-lg" src={profile.profilePhotoUrl} alt="" /> : <Avatar size="lg">{initials(displayName)}</Avatar>}<div className="personal-profile-main"><div><h1 className="display-xl">{displayName}</h1><p className="profile-handle">@{profileHandle}</p>{profile.verificationState === 'verified' ? <span className="source-chip">Verified</span> : null}</div><div className="form-actions">{profile.uid === user?.uid ? <a className="btn btn-primary btn-sm" href="#/profile">Back to my profile</a> : <button className={`btn btn-${following ? 'secondary' : 'primary'} btn-sm`} type="button" onClick={changeFollow} disabled={!user || followBusy} aria-pressed={following}>{followBusy ? 'Saving...' : following ? 'Following' : 'Follow'}</button>}<a className="btn btn-secondary btn-sm" href="#/messages">Message</a><button className="btn btn-secondary btn-sm" type="button" onClick={shareProfile}>Share Profile</button><button className="btn btn-secondary btn-sm" type="button" onClick={copyProfileLink}>Copy Profile Link</button>{user && profile.uid !== user.uid ? <a className="btn btn-secondary btn-sm" href="#/profile">My Profile</a> : null}</div></div>{profile.bio ? <p className="body-md">{profile.bio}</p> : <p className="body-sm">No public bio yet.</p>}<div className="profile-details">{profile.location ? <span>{profile.location}</span> : null}{profile.website ? <a href={profile.website} target="_blank" rel="noreferrer">{profile.website.replace(/^https?:\/\//, '')}</a> : null}<span>Joined {relativeTime(joined)}</span></div>{notice ? <p className="form-notice" role="status">{notice}</p> : null}</section><section className="metrics public-profile-stats">{stats.map(([label, value]) => <span key={label}><strong>{formatViewCount(value)}</strong> {label}</span>)}</section><Section title="Public activity"><div className="profile-tabs">{['Posts', 'Replies', 'Echoes', 'Media', 'Likes', 'Events', 'Shared reports'].map((item) => <button className="profile-tab" type="button" key={item}>{item}</button>)}</div><div className="glass card compact-empty"><p className="body-sm">Public activity for @{profileHandle} appears here when available.</p></div></Section><Section title="Profile actions"><div className="form-actions"><button className="btn btn-secondary btn-sm" type="button" onClick={() => setNotice('Report received for review.')}>Report User</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setNotice('User blocked on this device for now.')}>Block User</button><button className="btn btn-secondary btn-sm" type="button" onClick={() => setNotice('User muted on this device for now.')}>Mute User</button></div></Section></div></main>;
 }
 
-function useRoute() { const routeValue = () => window.location.pathname.startsWith('/@') ? window.location.pathname : window.location.hash.replace('#', '') || '/'; const [route, setRoute] = useState(routeValue); useEffect(() => { const change = () => setRoute(routeValue()); window.addEventListener('hashchange', change); window.addEventListener('popstate', change); return () => { window.removeEventListener('hashchange', change); window.removeEventListener('popstate', change); }; }, []); return route; }
+function useRoute() { const routeValue = () => { const hashRoute = window.location.hash.replace('#', ''); return hashRoute && hashRoute !== '/' ? hashRoute : window.location.pathname.startsWith('/@') ? window.location.pathname : hashRoute || '/'; }; const [route, setRoute] = useState(routeValue); useEffect(() => { const change = () => setRoute(routeValue()); window.addEventListener('hashchange', change); window.addEventListener('popstate', change); return () => { window.removeEventListener('hashchange', change); window.removeEventListener('popstate', change); }; }, []); return route; }
 
 export function App() {
   const current = useRoute(); const [user, setUser] = useState(undefined); const [profile, setProfile] = useState(null); const [events, setEvents] = useState([]); const [eventsLoading, setEventsLoading] = useState(true); const [eventsError, setEventsError] = useState(''); const [vortexEntries, setVortexEntries] = useState([]); const [vortexLoading, setVortexLoading] = useState(true); const [vortexError, setVortexError] = useState(''); const [following, setFollowing] = useState(new Set()); const [posts, setPosts] = useState([]); const [echoedPostIds, setEchoedPostIds] = useState(new Set()); const [likedPostIds, setLikedPostIds] = useState(new Set()); const [bookmarkedPostIds, setBookmarkedPostIds] = useState(new Set()); const [echoActivity, setEchoActivity] = useState([]); const [handlePurchases, setHandlePurchases] = useState([]); const [handleRequests, setHandleRequests] = useState([]); const [shellNotifications, setShellNotifications] = useState([]); const [deletedPostIds, setDeletedPostIds] = useState(new Set()); const [toast, setToast] = useState(''); const [quotePost, setQuotePost] = useState(null); const [postComposerOpen, setPostComposerOpen] = useState(false); const [echoBusy, setEchoBusy] = useState(false); const [createOpen, setCreateOpen] = useState(false);
-  useEffect(() => { if (!hasFirebaseConfig) { setUser(null); return undefined; } return observeSession(setUser); }, []);
+  useEffect(() => { if (!hasFirebaseConfig) { setUser(null); return undefined; } return observeSession(async (nextUser) => { if (nextUser) { try { await ensurePortalUserProfile(nextUser); } catch { /* Profile setup will surface any persistent account issue. */ } } setUser(nextUser); }); }, []);
   useEffect(() => { if (!user) return undefined; const stopProfile = observeProfile(user.uid, (snapshot) => setProfile(snapshot.exists() ? snapshot.data() : null)); const stopEvents = observeEvents((snapshot) => { setEvents(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))); setEventsLoading(false); }, (reason) => { setEventsError(firebaseMessage(reason)); setEventsLoading(false); }); const stopVortex = observeVortex(user.uid, (snapshot) => setFollowing(new Set(snapshot.docs.map((item) => item.id)))); const stopEntries = observeVortexEntries((snapshot) => { setVortexEntries(snapshot.docs.map((item) => item.data())); setVortexLoading(false); }, (reason) => { setVortexError(firebaseMessage(reason)); setVortexLoading(false); }); const stopPosts = observePublicPosts((snapshot) => setPosts(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))), () => setPosts([])); const stopPurchases = observeHandlePurchases(user.uid, (snapshot) => setHandlePurchases(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))), () => setHandlePurchases([])); const stopRequests = observeHandleRequests(user.uid, (snapshot) => setHandleRequests(snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).reverse()), () => setHandleRequests([])); const stopLikes = observeUserPostLikes(user.uid, (snapshot) => setLikedPostIds(new Set(snapshot.docs.map((item) => item.data().postId))), () => setLikedPostIds(new Set())); const stopBookmarks = observeUserPostBookmarks(user.uid, (snapshot) => setBookmarkedPostIds(new Set(snapshot.docs.map((item) => item.data().postId))), () => setBookmarkedPostIds(new Set())); const stopEchoes = observeUserEchoes(user.uid, (snapshot) => { const records = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })); setEchoActivity(records); setEchoedPostIds(new Set(records.map((item) => item.sourcePostId))); }, () => { setEchoActivity([]); setEchoedPostIds(new Set()); }); const stopNotifications = observePortalNotifications(user.uid, (snapshot) => setShellNotifications(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))), () => setShellNotifications([])); return () => { stopProfile(); stopEvents(); stopVortex(); stopEntries(); stopPosts(); stopPurchases(); stopRequests(); stopLikes(); stopBookmarks(); stopEchoes(); stopNotifications(); }; }, [user]);
   useEffect(() => { const accountRoutes = { '/settings': 'Settings', '/memory': 'Portal+ Memory', '/contributors': 'Contributor Hub', '/messages': 'Messages', '/sources': 'Official Sources' }; const route = current.startsWith('/events/') ? 'Event' : current.startsWith('/posts/') ? 'Post' : accountRoutes[current] || routes.concat(secondaryRoutes).find((item) => item.path === current)?.label || 'Home'; document.title = `${route} · Portal`; }, [current]);
   async function follow(eventId, next) { if (!user) return; await setVortexFollow(user.uid, eventId, next); }
@@ -884,7 +903,7 @@ export function App() {
   }
 
   if (user === undefined) return <main className="auth-shell"><Loading label="Restoring your Portal session..." /></main>;
-  if (current.startsWith('/@')) return <PublicProfile handle={current.slice(2)} />;
+  if (current.startsWith('/@')) return <PublicProfile handle={current.slice(2)} user={user} />;
   if (!user) return <AuthScreen />;
   const unreadNotificationCount = shellNotifications.filter((item) => !item.read && item.archived !== true).length;
   const visiblePosts = posts.filter((post) => !deletedPostIds.has(post.id));

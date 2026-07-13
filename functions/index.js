@@ -1043,17 +1043,99 @@ export const checkHandleAvailability = onCall(async (request) => {
 export const reserveHandle = onCall(async (request) => claimHandle(request, requireAuth(request), request.data?.handle || '', false, profileSetup(request.data?.profile)));
 export const changeHandle = onCall(async (request) => claimHandle(request, requireAuth(request), request.data?.handle || '', true));
 
+function publicProfileFields(uid, user = {}) {
+  return {
+    uid,
+    displayName: user.displayName || null,
+    handle: user.handle || user.normalizedHandle || null,
+    normalizedHandle: user.normalizedHandle || null,
+    profilePhotoUrl: user.profilePhotoUrl || null,
+    bannerUrl: user.bannerUrl || null,
+    bio: user.bio || null,
+    location: user.location || null,
+    website: user.website || null,
+    accountType: user.accountType || 'member',
+    verificationState: user.verificationState || 'unverified',
+    followerCount: Math.max(0, Number(user.followerCount || 0)),
+    followingCount: Math.max(0, Number(user.followingCount || 0)),
+    joinedAt: user.createdAt || null,
+  };
+}
+
+async function resolvePortalIdentity(normalizedHandle) {
+  const handleRef = db.collection('handles').doc(normalizedHandle);
+  const handle = await handleRef.get();
+  let uid = handle.exists ? (handle.data().uid || handle.data().ownerUid) : null;
+  let repairedRegistry = false;
+  if (!uid) {
+    const matches = await db.collection('users').where('normalizedHandle', '==', normalizedHandle).limit(2).get();
+    if (matches.size !== 1) throw new HttpsError('not-found', 'Profile not found.');
+    uid = matches.docs[0].id;
+    await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(handleRef);
+      if (current.exists && (current.data().uid || current.data().ownerUid) !== uid) throw new HttpsError('already-exists', 'That handle belongs to another Portal identity.');
+      transaction.set(handleRef, { uid, ownerUid: uid, originalHandle: matches.docs[0].data().handle || normalizedHandle, normalizedHandle, status: 'active', marketplaceClass: 'active_user', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    });
+    repairedRegistry = true;
+  }
+  const [publicProfile, userProfile] = await Promise.all([
+    db.collection('publicProfiles').doc(uid).get(),
+    db.collection('users').doc(uid).get(),
+  ]);
+  if (!userProfile.exists && !publicProfile.exists) throw new HttpsError('not-found', 'Profile not found.');
+  const canonical = { ...(publicProfile.data() || {}), ...(userProfile.data() || {}) };
+  if (canonical.normalizedHandle !== normalizedHandle) throw new HttpsError('not-found', 'Profile not found.');
+  const fields = publicProfileFields(uid, canonical);
+  if (!publicProfile.exists || repairedRegistry) await db.collection('publicProfiles').doc(uid).set({ ...fields, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return fields;
+}
+
 export const resolveHandle = onCall(async (request) => {
   const requested = normalizeHandle(request.data?.handle || '');
   const validation = validateHandle(requested);
   if (!validation.valid) throw new HttpsError('invalid-argument', 'That handle is invalid.');
-  const handle = await db.collection('handles').doc(validation.normalizedHandle).get();
-  if (!handle.exists) throw new HttpsError('not-found', 'Profile not found.');
-  const pointer = handle.data();
-  const uid = pointer.status === 'redirect' ? pointer.uid : pointer.uid;
-  const publicProfile = await db.collection('publicProfiles').doc(uid).get();
-  if (!publicProfile.exists) throw new HttpsError('not-found', 'Profile not found.');
-  return { ...publicProfile.data(), redirectedFrom: pointer.status === 'redirect' ? requested : null };
+  const profile = await resolvePortalIdentity(validation.normalizedHandle);
+  const follow = request.auth?.uid && request.auth.uid !== profile.uid
+    ? await db.collection('users').doc(request.auth.uid).collection('following').doc(profile.uid).get()
+    : null;
+  return { ...profile, isFollowing: follow?.exists === true, redirectedFrom: null };
+});
+
+export const togglePortalProfileFollow = onCall(async (request) => {
+  const followerUid = requireAuth(request);
+  const targetUid = String(request.data?.targetUid || '').trim();
+  const shouldFollow = request.data?.following === true;
+  if (!targetUid || targetUid === followerUid) throw new HttpsError('invalid-argument', 'Choose another Portal profile.');
+  const followerRef = db.collection('users').doc(followerUid);
+  const targetRef = db.collection('users').doc(targetUid);
+  const followingRef = followerRef.collection('following').doc(targetUid);
+  const followerRecordRef = targetRef.collection('followers').doc(followerUid);
+  const followerPublicRef = db.collection('publicProfiles').doc(followerUid);
+  const targetPublicRef = db.collection('publicProfiles').doc(targetUid);
+  const result = await db.runTransaction(async (transaction) => {
+    const [follower, target, relationship, followerPublic, targetPublic] = await Promise.all([
+      transaction.get(followerRef), transaction.get(targetRef), transaction.get(followingRef), transaction.get(followerPublicRef), transaction.get(targetPublicRef),
+    ]);
+    if (!target.exists || !target.data().normalizedHandle || target.data().handleStatus === 'suspended') throw new HttpsError('not-found', 'Profile not found.');
+    const active = relationship.exists;
+    if (active === shouldFollow) return { following: active, followerCount: Math.max(0, Number(target.data().followerCount || targetPublic.data()?.followerCount || 0)) };
+    const followerCount = Math.max(0, Number(target.data().followerCount || targetPublic.data()?.followerCount || 0) + (shouldFollow ? 1 : -1));
+    const followingCount = Math.max(0, Number(follower.data()?.followingCount || followerPublic.data()?.followingCount || 0) + (shouldFollow ? 1 : -1));
+    if (shouldFollow) {
+      transaction.set(followingRef, { followerUid, targetUid, createdAt: FieldValue.serverTimestamp() });
+      transaction.set(followerRecordRef, { followerUid, targetUid, createdAt: FieldValue.serverTimestamp() });
+      transaction.set(targetRef.collection('notifications').doc(`follow_${followerUid}`), { type: 'follow', authorUid: followerUid, actorUid: followerUid, targetUid, read: false, createdAt: FieldValue.serverTimestamp() }, { merge: true });
+    } else {
+      transaction.delete(followingRef);
+      transaction.delete(followerRecordRef);
+    }
+    transaction.set(followerRef, { followingCount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    transaction.set(targetRef, { followerCount, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    if (followerPublic.exists) transaction.update(followerPublicRef, { followingCount, updatedAt: FieldValue.serverTimestamp() });
+    if (targetPublic.exists) transaction.update(targetPublicRef, { followerCount, updatedAt: FieldValue.serverTimestamp() });
+    return { following: shouldFollow, followerCount };
+  });
+  return result;
 });
 
 export const searchPortalProfiles = onCall(async (request) => {
@@ -1074,7 +1156,7 @@ export const syncPublicPortalProfile = onDocumentWritten('users/{uid}', async (e
   if (!event.data?.after.exists) { await target.delete(); return; }
   const user = event.data.after.data();
   if (!user.normalizedHandle || user.handleStatus === 'suspended') { await target.delete(); return; }
-  await target.set({ uid: event.params.uid, displayName: user.displayName || null, handle: user.handle, normalizedHandle: user.normalizedHandle, profilePhotoUrl: user.profilePhotoUrl || null, bio: user.bio || null, location: user.location || null, website: user.website || null, accountType: user.accountType || 'member', verificationState: user.verificationState || 'unverified', joinedAt: user.createdAt || null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  await target.set({ ...publicProfileFields(event.params.uid, user), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 });
 
 export const notifyPortalReportMentions = onDocumentWritten('events/{eventId}/reports/{reportId}', async (event) => {

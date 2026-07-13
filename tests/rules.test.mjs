@@ -33,6 +33,14 @@ describe('Portal Firebase rules', () => {
     await assertFails(getDoc(doc(maya.firestore(), 'users/jason/vortex/event-1')));
   });
 
+  it('keeps profile follows server-authoritative', async () => {
+    const nike = testEnv.authenticatedContext('nike-follow');
+    const jason = testEnv.authenticatedContext('jason-follow');
+    await assertFails(setDoc(doc(nike.firestore(), 'users/nike-follow/following/jason-follow'), { followerUid: 'nike-follow', targetUid: 'jason-follow' }));
+    await assertFails(setDoc(doc(nike.firestore(), 'users/jason-follow/followers/nike-follow'), { followerUid: 'nike-follow', targetUid: 'jason-follow' }));
+    await assertFails(setDoc(doc(jason.firestore(), 'users/jason-follow'), { followerCount: 999 }, { merge: true }));
+  });
+
   it('blocks direct handle ownership writes while allowing profile details', async () => {
     const jason = testEnv.authenticatedContext('jason-profile');
     await assertSucceeds(setDoc(doc(jason.firestore(), 'users/jason-profile'), { displayName: 'Jason', email: 'jason@example.com', preferences: {}, createdAt: new Date(), updatedAt: new Date() }));
