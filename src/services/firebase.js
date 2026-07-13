@@ -430,8 +430,7 @@ export async function createPortalConversation(user, profile) {
   const participants = [user.uid, profile.uid].sort();
   const conversationId = `dm_${participants.join('_')}`;
   const conversationRef = doc(db, 'messageConversations', conversationId);
-  const existing = await getDoc(conversationRef);
-  if (!existing.exists()) {
+  try {
     await setDoc(conversationRef, {
       participantUids: participants,
       participantHandles: [user.displayName || 'You', profile.handle || profile.displayName || 'Portal user'],
@@ -443,9 +442,18 @@ export async function createPortalConversation(user, profile) {
       updatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
       pinned: false,
+      pinnedBy: [],
+      archivedBy: [],
+      deletedBy: [],
       unreadBy: [],
       typingUids: [],
     });
+  } catch (error) {
+    // A deterministic DM may already exist. Its participants can read and reopen it;
+    // a missing document cannot be read under the membership rule, so create comes first.
+    if (error?.code !== 'permission-denied') throw error;
+    const existing = await getDoc(conversationRef);
+    if (!existing.exists() || !existing.data().participantUids?.includes(user.uid)) throw error;
   }
   return conversationId;
 }

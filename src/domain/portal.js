@@ -9,6 +9,7 @@ export const routes = [
   { path: '/messages', label: 'Messages', icon: 'messages', badge: 3 },
   { path: '/notifications', label: 'Notifications', icon: 'notifications', dot: true },
   { path: '/profile', label: 'Profile', icon: 'profile' },
+  { path: '/bookmarks', label: 'Bookmarks', icon: 'bookmark' },
 ];
 
 export const secondaryRoutes = [

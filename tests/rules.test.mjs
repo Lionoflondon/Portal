@@ -80,6 +80,22 @@ describe('Portal Firebase rules', () => {
     await assertFails(setDoc(doc(maya.firestore(), 'posts/post-1'), { authorUid: 'maya-echo', visibility: 'public' }));
   });
 
+  it('allows participants to create, reopen and use Portal conversations', async () => {
+    const jason = testEnv.authenticatedContext('jason-message');
+    const nike = testEnv.authenticatedContext('nike-message');
+    const stranger = testEnv.authenticatedContext('stranger-message');
+    const conversationPath = 'messageConversations/dm_jason-message_nike-message';
+    await assertFails(getDoc(doc(jason.firestore(), conversationPath)));
+    await assertSucceeds(setDoc(doc(jason.firestore(), conversationPath), {
+      participantUids: ['jason-message', 'nike-message'], participantHandles: ['jason', 'nike'], participantPhotoUrls: ['', ''], title: 'Nike', createdBy: 'jason-message', lastMessage: '', lastMessageAt: new Date(), updatedAt: new Date(), createdAt: new Date(), pinned: false, pinnedBy: [], archivedBy: [], deletedBy: [], unreadBy: [], typingUids: [],
+    }));
+    await assertSucceeds(getDoc(doc(nike.firestore(), conversationPath)));
+    await assertFails(getDoc(doc(stranger.firestore(), conversationPath)));
+    await assertSucceeds(setDoc(doc(jason.firestore(), `${conversationPath}/messages/first`), { senderUid: 'jason-message', body: 'Hello', media: null, replyTo: null, linkPreview: null, readBy: ['jason-message'], createdAt: new Date() }));
+    await assertSucceeds(getDoc(doc(nike.firestore(), `${conversationPath}/messages/first`)));
+    await assertFails(setDoc(doc(stranger.firestore(), `${conversationPath}/messages/intrusion`), { senderUid: 'stranger-message', body: 'No', media: null, replyTo: null, linkPreview: null, readBy: ['stranger-message'], createdAt: new Date() }));
+  });
+
   it('keeps Echo notifications private and read-only except read state', async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'users/jason-notify/notifications/echo-1'), { type: 'echo', postId: 'post-1', read: false, createdAt: new Date() });

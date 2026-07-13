@@ -6,6 +6,18 @@ import { secondaryRoutes } from '../domain/portal.js';
 import { App, EVENTS_UNAVAILABLE_MESSAGE, PROFILE_HANDLE_PLACEHOLDER } from './App.jsx';
 
 describe('Portal app shell', () => {
+  it('stabilises messaging, bookmarks, Quote previews and notification badges', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const css = readFileSync(resolve('src/styles.css'), 'utf8');
+    expect(service).toContain('a missing document cannot be read under the membership rule');
+    expect(source).toContain("current === '/bookmarks'");
+    expect(source).toContain("unreadCount > 20 ? '20+' : unreadCount");
+    expect(source).toContain('<PostMedia post={post} />');
+    expect(source).toContain("tab === 'Echoes' ? echoedPosts");
+    expect(source).toContain('This creator is not currently eligible to receive support.');
+    expect(css).toContain('.vortex-field:focus-within');
+  });
   it('renders the authenticated entry surface and explains missing local config', () => {
     render(<App />);
     expect(screen.getByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
