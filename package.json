@@ -8,6 +8,8 @@
     "guard:isolation": "node scripts/guard-portal-isolation.mjs",
     "build": "npm run guard:isolation && vite build",
     "build:admin": "npm run guard:isolation && vite build --config vite.admin.config.js",
+    "verify:admin-deploy": "node scripts/verify-admin-deployment.mjs",
+    "deploy:admin": "npm run build:admin && firebase deploy --only hosting:portal-admin --project portal-prod-f2308 && npm run verify:admin-deploy",
     "check:admin-readiness": "node scripts/admin-production-readiness-check.mjs",
     "lint": "eslint .",
     "test": "vitest run src",
