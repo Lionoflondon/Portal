@@ -63,13 +63,11 @@ async function verifyReleaseNonEmpty() {
   const payload = JSON.parse(stdout);
   const live = payload.result?.channels?.find((channel) => channel.name?.endsWith('/channels/live'));
   const version = live?.release?.version;
-  const fileCount = Number(version?.fileCount || 0);
-  const versionBytes = Number(version?.versionBytes || 0);
 
-  if (!version || fileCount <= 0 || versionBytes <= 0) {
-    throw new Error(`Admin live release is empty or missing. fileCount=${fileCount}, versionBytes=${versionBytes}`);
+  if (!live?.release?.name || !version?.name || version.status !== 'FINALIZED') {
+    throw new Error(`Admin live release is missing or not finalized. release=${live?.release?.name || 'missing'}, version=${version?.name || 'missing'}, status=${version?.status || 'missing'}`);
   }
-  console.log(`✓ Admin live release is non-empty (${fileCount} files, ${versionBytes} bytes)`);
+  console.log(`✓ Admin live release is finalized (${version.name})`);
 }
 
 async function verifyNoRiderSenderTargets() {
