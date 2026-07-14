@@ -1382,6 +1382,35 @@ export const searchPortalAdminUsers = onCall(async (request) => {
   return { users, totalUsers: authUsers.length, truncated: matchingAuthUsers.length < authUsers.length && !search };
 });
 
+export const searchPortalAdminNotifications = onCall(async (request) => {
+  requireAdminPermission(request, 'broadcast_notification');
+  const search = String(request.data?.query || '').trim().toLowerCase().slice(0, 120);
+  const requestedLimit = Math.max(1, Math.min(250, Number(request.data?.limit || 100)));
+  const snapshot = await db.collection('broadcastNotifications').orderBy('createdAt', 'desc').limit(requestedLimit).get();
+  const notifications = snapshot.docs
+    .map((document) => ({ id: document.id, ...document.data() }))
+    .filter((item) => {
+      if (!search) return true;
+      return [
+        item.title,
+        item.audience,
+        item.type,
+        item.status,
+        item.body,
+        item.message,
+        item.createdByUid,
+      ].some((value) => String(value || '').toLowerCase().includes(search));
+    })
+    .map((item) => ({
+      ...item,
+      createdAt: adminDate(item.createdAt),
+      updatedAt: adminDate(item.updatedAt),
+      scheduledAt: adminDate(item.scheduledAt),
+      sentAt: adminDate(item.sentAt),
+    }));
+  return { notifications, total: notifications.length };
+});
+
 export const getPortalAdminUserRecord = onCall(async (request) => {
   requireAdminPermission(request, 'view_users');
   const uid = String(request.data?.uid || '').trim();

@@ -206,6 +206,20 @@ describe('Portal Admin authentication', () => {
     expect(service).toContain('systemHealth');
   });
 
+  it('loads Admin Notifications through a server RBAC callable instead of direct Firestore reads', () => {
+    const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const functions = readFileSync(resolve('functions/index.js'), 'utf8');
+    const hookBlock = adminSource.match(/function useAdminCollection\([\s\S]*?\n}\n\nfunction valueForPath/)?.[0] || '';
+    expect(functions).toContain('export const searchPortalAdminNotifications = onCall');
+    expect(functions).toContain("requireAdminPermission(request, 'broadcast_notification')");
+    expect(functions).toContain("db.collection('broadcastNotifications').orderBy('createdAt', 'desc')");
+    expect(service).toContain("callPortalIdentity('searchPortalAdminNotifications'");
+    expect(hookBlock).toContain("key === 'broadcastNotifications'");
+    expect(hookBlock).toContain('searchPortalAdminNotifications(search, max)');
+    expect(adminSource).toContain("['users', 'broadcastNotifications'].includes(collectionKey) ? term : ''");
+  });
+
   it('hardens Admin V4 with server-enforced RBAC, approvals, audit and recovery surfaces', () => {
     const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
     const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
