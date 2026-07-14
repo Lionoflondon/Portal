@@ -183,6 +183,8 @@ export async function createPortalEvent(user, values) {
     category: values.category || values.eventType || 'Other',
     locationSummary: values.location || '',
     primaryLocation: values.location || '',
+    heroImageUrl: values.heroImageUrl || '',
+    mediaPreview: values.heroImageUrl ? { url: values.heroImageUrl, type: 'image' } : null,
     automaticGpsRequested: Boolean(values.automaticGps),
     date: values.date || '',
     time: values.time || '',
@@ -195,7 +197,7 @@ export async function createPortalEvent(user, values) {
     updateCount: 1,
     viewCount: 0,
     shareCount: 0,
-    media: { photoCount: values.photoCount || 0, hasVideo: Boolean(values.videoCount) },
+    media: { photoCount: values.photoCount || (values.heroImageUrl ? 1 : 0), hasVideo: Boolean(values.videoCount) },
     publishedAt: serverTimestamp(),
     createdBy: user.uid,
     authorUid: user.uid,
@@ -215,12 +217,22 @@ export function updatePortalEvent(eventId, values) {
     category: values.category || values.eventType || 'Other',
     locationSummary: values.location || values.locationSummary || '',
     primaryLocation: values.location || values.primaryLocation || '',
+    heroImageUrl: values.heroImageUrl || values.heroImageUrl === '' ? values.heroImageUrl : values.existingHeroImageUrl || '',
+    mediaPreview: values.heroImageUrl ? { url: values.heroImageUrl, type: 'image' } : values.mediaPreview || null,
     date: values.date || '',
     time: values.time || '',
     visibility: values.visibility || 'public',
     parentEventId: values.parentEventId || null,
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function uploadPortalEventCover(user, draftId, file, onProgress) {
+  if (!file) return null;
+  if (!file.type.startsWith('image/') || file.size > 25 * 1024 * 1024) throw new Error('Event cover must be an image under 25 MB.');
+  const prepared = await compressImage(file);
+  const uploaded = await uploadPostFile(user, draftId, prepared, 'event-cover', onProgress);
+  return uploaded.url;
 }
 
 export function archivePortalEvent(eventId) {

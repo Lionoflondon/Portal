@@ -579,7 +579,8 @@ describe('Portal app shell', () => {
     expect(eventCardBlock).not.toContain('event-mini-map');
     expect(vortexBlock).toContain('People');
     expect(vortexBlock).toContain('Handles');
-    expect(vortexBlock).toContain('Trending searches');
+    expect(vortexBlock).toContain('Trending topics');
+    expect(vortexBlock).toContain('Trending creators');
     expect(vortexBlock).toContain('function updateTerm(value) { setTerm(value); }');
     expect(vortexBlock).not.toContain('window.location.hash = publicProfileRoute(value)');
     expect(settingsBlock).toContain('Appearance');
@@ -643,5 +644,32 @@ describe('Portal app shell', () => {
     expect(styles).toContain('.masonry-event-card{cursor:pointer}');
     expect(styles).toContain('.report-detail-modal');
     expect(styles).toContain('.media-gallery-frame');
+  });
+
+  it('implements Search & Discovery V2 with scopes, advanced filters, saved searches and map mode', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const services = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const vortexBlock = source.match(/function Vortex\([\s\S]*?\n}\n\nfunction storyEventIds/)?.[0] || '';
+    const formBlock = source.match(/function EventForm\([\s\S]*?\n}\n\nfunction Events/)?.[0] || '';
+    expect(vortexBlock).toContain("['Random', 'Local', 'Citywide', 'National', 'Global']");
+    expect(vortexBlock).toContain('Advanced filters');
+    expect(vortexBlock).toContain('Saved searches');
+    expect(vortexBlock).toContain('Map discovery');
+    expect(vortexBlock).toContain('function fuzzyMatch(text, search)');
+    expect(vortexBlock).toContain('const eventResults = events.map');
+    expect(vortexBlock).toContain('const reportResults = entryResults.filter');
+    expect(vortexBlock).toContain('const topicResults =');
+    expect(vortexBlock).toContain('No matching events yet.');
+    expect(vortexBlock).toContain('Try another location, category or timeframe.');
+    expect(source).toContain('events={events} posts={visiblePosts}');
+    expect(formBlock).toContain('Cover image');
+    expect(formBlock).toContain('uploadPortalEventCover');
+    expect(formBlock).toContain('event-cover-preview');
+    expect(services).toContain('export async function uploadPortalEventCover');
+    expect(services).toContain('heroImageUrl');
+    expect(styles).toContain('.discovery-toolbar');
+    expect(styles).toContain('.discovery-map');
+    expect(styles).toContain('.event-cover-preview');
   });
 });
