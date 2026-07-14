@@ -613,4 +613,35 @@ describe('Portal app shell', () => {
     expect(formBlock).toContain('Original discussion');
     expect(formBlock).toContain('Events stay connected to the conversations that inspired them.');
   });
+
+  it('opens Event and Report cards into detail surfaces without breaking explicit actions', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const eventCardBlock = source.match(/function EventCard\([\s\S]*?\n}\n\nfunction EventCollection/)?.[0] || '';
+    const eventDetailBlock = source.match(/function EventDetail\([\s\S]*?\n}\n\nfunction ReportDetailModal/)?.[0] || '';
+    const reportDetailBlock = source.match(/function ReportDetailModal\([\s\S]*?\n}\n\nfunction TimelineList/)?.[0] || '';
+    const timelineBlock = source.match(/function TimelineList\([\s\S]*?\n}\n\nfunction Vortex/)?.[0] || '';
+    const postMediaBlock = source.match(/function PostMedia\([\s\S]*?\n}\n\nfunction PostCard/)?.[0] || '';
+    expect(eventCardBlock).toContain('role="link"');
+    expect(eventCardBlock).toContain('tabIndex="0"');
+    expect(eventCardBlock).toContain("window.location.hash = `#/events/${event.id}`");
+    expect(eventCardBlock).toContain('item.stopPropagation(); onFollow?.');
+    expect(eventCardBlock).toContain('item.stopPropagation(); navigator.clipboard');
+    expect(eventDetailBlock).toContain('event-detail-hero');
+    expect(eventDetailBlock).toContain('Pulse Strength {pulse}');
+    expect(eventDetailBlock).toContain('Author {eventAuthor}');
+    expect(eventDetailBlock).toContain('Copy link');
+    expect(eventDetailBlock).toContain('Support');
+    expect(eventDetailBlock).toContain('setSelectedReport(item)');
+    expect(eventDetailBlock).toContain('report-detail-card');
+    expect(reportDetailBlock).toContain('Report detail');
+    expect(reportDetailBlock).toContain('report-detail-modal');
+    expect(timelineBlock).toContain('report-timeline-button');
+    expect(timelineBlock).toContain("entry.entryType === 'Report'");
+    expect(postMediaBlock).toContain('media-expand-button');
+    expect(postMediaBlock).toContain('media-gallery');
+    expect(styles).toContain('.masonry-event-card{cursor:pointer}');
+    expect(styles).toContain('.report-detail-modal');
+    expect(styles).toContain('.media-gallery-frame');
+  });
 });

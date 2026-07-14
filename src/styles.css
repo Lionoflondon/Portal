@@ -115,3 +115,11 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}button
 /* Conversation-first creation polish. */
 .post-publish-preview{display:grid;gap:8px;padding:14px 16px}.post-publish-preview p{white-space:pre-wrap;color:var(--text-primary);line-height:1.55}.post-publish-preview small{color:var(--text-secondary)}
 .conversation-event-form .event-question-card{display:grid;gap:6px;padding:14px 16px;border-radius:16px;background:rgba(99,214,242,.055);border-color:rgba(99,214,242,.14)}.conversation-event-form .event-question-card strong{font-size:15px;line-height:1.35}.conversation-event-form input[type=file]:disabled{opacity:.7}
+
+/* P0 card opening and detail surfaces. */
+.masonry-event-card{cursor:pointer}.masonry-event-card .btn,.masonry-event-card a{position:relative;z-index:3}.event-detail-hero{background-size:cover;background-position:center}.event-detail-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+.report-detail-card,.report-timeline-button{width:100%;text-align:left;color:inherit}.report-detail-card{display:grid;gap:8px}.report-timeline-button{background:transparent;border:0}.report-timeline-button:hover,.report-detail-card:hover{border-color:rgba(99,214,242,.24);background:rgba(99,214,242,.045)}
+.report-detail-modal{max-width:720px}.report-detail-body{display:grid;gap:14px}.report-detail-media{width:100%;max-height:58vh;object-fit:contain;border-radius:16px;border:1px solid var(--glass-border);background:rgba(0,0,0,.24)}
+.media-expand-button{display:block;width:100%;height:100%;overflow:hidden;border-radius:inherit;background:transparent}.media-expand-button img{width:100%;height:100%;object-fit:cover;display:block}.media-gallery{z-index:240}.media-gallery-frame{position:relative;max-width:min(980px,92vw);max-height:88vh;padding:14px;border:1px solid var(--glass-border-strong);border-radius:22px;background:rgba(12,15,24,.94);box-shadow:var(--shadow-soft)}.media-gallery-frame img{display:block;max-width:100%;max-height:78vh;object-fit:contain;border-radius:14px}
+@media (max-width:900px){.event-detail-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.event-detail-metrics{grid-template-columns:1fr}.hero-meta .btn{flex:1}}
