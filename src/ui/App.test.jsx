@@ -113,10 +113,31 @@ describe('Portal app shell', () => {
   it('fails closed with a genuine-content empty state', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const collectionBlock = source.match(/function EventCollection\([\s\S]*?\n}\n\nfunction PostMedia/)?.[0] || '';
-    expect(collectionBlock).toContain('No verified source or Portal member event matches this view.');
-    expect(collectionBlock).toContain('New genuine events will appear here when they are published.');
+    expect(collectionBlock).toContain('No live events available.');
+    expect(collectionBlock).toContain('Events will appear as trusted sources become available.');
     expect(collectionBlock).not.toContain('demo');
     expect(collectionBlock).not.toContain('placeholder');
+  });
+
+  it('keeps Events filters compact without changing masonry card scale', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
+    const eventsBlock = source.match(/function Events\([\s\S]*?\n}\n\nfunction EventDetail/)?.[0] || '';
+    expect(eventsBlock).toContain('event-filter-primary');
+    expect(eventsBlock).toContain('event-filter-status');
+    expect(eventsBlock).toContain('event-filter-region');
+    expect(eventsBlock).toContain('event-filter-sector');
+    expect(eventsBlock).toContain('event-filter-scroll');
+    expect(eventsBlock).toContain('onClick={() => setFilter(item)}');
+    expect(eventsBlock).toContain('onClick={() => setRegion(item)}');
+    expect(eventsBlock).toContain('onClick={() => setCategory(item)}');
+    expect(styles).toContain('.event-filter-primary{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr)');
+    expect(styles).toContain('.event-filter-sector{display:flex;align-items:center;gap:10px');
+    expect(styles).toContain('.event-filter-scroll{display:flex;align-items:center;gap:7px;min-width:0;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap');
+    expect(styles).toContain('.event-filter-scroll .chip{flex:0 0 auto;min-height:40px;white-space:nowrap}');
+    expect(styles).toContain('.events-canvas .event-discovery-controls{display:grid;gap:9px;width:100%;padding:10px 0 12px');
+    expect(styles).toContain('grid-template-columns:repeat(var(--event-columns,4),minmax(0,1fr))');
+    expect(styles).toContain('.masonry-event-card{position:relative;display:block;width:100%;min-width:0');
   });
 
 
