@@ -745,6 +745,7 @@ function requireAuth(request) {
 
 const ADMIN_ROLE_PERMISSIONS = {
   super_admin: ['*'],
+  admin: ['view_users', 'view_reports', 'view_audit_logs', 'export_reports', 'broadcast_notification', 'suspend_user', 'restore_content', 'approve_verification', 'transfer_handle', 'recover_handle', 'view_analytics'],
   trust_safety: ['suspend_user', 'ban_user', 'restore_content', 'permanent_delete', 'quick_approve', 'quick_remove', 'quick_suspend', 'bulk_moderation', 'view_audit_logs', 'export_reports', 'restore_deleted_content', 'restore_suspended_users'],
   verification_team: ['approve_verification', 'remove_verification', 'request_documents', 'view_audit_logs', 'export_reports'],
   marketplace_team: ['transfer_handle', 'recover_handle', 'marketplace_reversal', 'refund_placeholder_purchase', 'view_audit_logs', 'export_reports', 'restore_handles'],
@@ -824,12 +825,18 @@ const SENSITIVE_ADMIN_ACTIONS = new Set([
   'large_creator_payout_approval',
 ]);
 
+function normalizeAdminRole(role) {
+  const normalized = String(role || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  if (normalized === 'superadmin') return 'super_admin';
+  return normalized;
+}
+
 function adminRoles(request) {
   const token = request.auth?.token || {};
   const raw = token.portalAdminRoles || token.portalAdminRole || (token.portalHandleSuperAdmin ? ['super_admin'] : []);
   const roles = Array.isArray(raw) ? raw : [raw];
   if (token.portalAdmin === true && roles.length === 0) roles.push('support');
-  return roles.map((role) => String(role || '').trim().toLowerCase().replaceAll(' ', '_')).filter(Boolean);
+  return roles.map(normalizeAdminRole).filter(Boolean);
 }
 
 function permissionForAction(action) {
@@ -1409,6 +1416,73 @@ export const searchPortalAdminNotifications = onCall(async (request) => {
       sentAt: adminDate(item.sentAt),
     }));
   return { notifications, total: notifications.length };
+});
+
+function reportSearchText(item) {
+  return [
+    item.id,
+    item.reporterUid,
+    item.reportedUid,
+    item.targetUid,
+    item.category,
+    item.reason,
+    item.type,
+    item.status,
+    item.queue,
+    item.evidence,
+    item.reporterNotes,
+    item.targetPreview,
+  ].map((value) => typeof value === 'object' ? JSON.stringify(value || {}) : String(value || '')).join(' ').toLowerCase();
+}
+
+function adminReportResult(document, source) {
+  const data = document.data() || {};
+  const evidence = data.evidence || data.evidenceSummary || data.evidenceUrl || data.sourceUrl || data.mediaUrl || data.targetPreview || data.body || data.description || null;
+  const history = data.history || data.moderationHistory || data.statusHistory || data.timeline || data.previousModerationHistory || null;
+  return {
+    id: document.id,
+    source,
+    sourcePath: document.ref.path,
+    reporterUid: data.reporterUid || data.createdBy || data.createdByUid || data.authorUid || data.reportedByUid || null,
+    reportedUid: data.reportedUid || data.targetUid || data.userUid || data.authorUid || data.reportedUserUid || null,
+    category: data.category || data.reason || data.reportType || data.type || data.queue || 'Report',
+    evidence,
+    history,
+    status: data.status || data.reviewStatus || data.moderationState || 'open',
+    createdAt: adminDate(data.createdAt),
+    updatedAt: adminDate(data.updatedAt),
+    queue: data.queue || data.category || data.reason || null,
+    reportCount: data.reportCount || data.count || 1,
+    reporterNotes: data.reporterNotes || data.notes || null,
+    targetPreview: data.targetPreview || data.preview || null,
+  };
+}
+
+export const searchPortalAdminReports = onCall(async (request) => {
+  requireAdminPermission(request, 'view_reports');
+  const search = String(request.data?.query || '').trim().toLowerCase().slice(0, 120);
+  const requestedLimit = Math.max(1, Math.min(500, Number(request.data?.limit || 250)));
+  const [reportsSnapshot, moderationSnapshot, eventReportsSnapshot] = await Promise.all([
+    db.collection('reports').orderBy('createdAt', 'desc').limit(requestedLimit).get().catch(() => ({ docs: [] })),
+    db.collection('moderationReports').orderBy('createdAt', 'desc').limit(requestedLimit).get().catch(() => ({ docs: [] })),
+    db.collectionGroup('reports').orderBy('createdAt', 'desc').limit(requestedLimit).get().catch(() => ({ docs: [] })),
+  ]);
+  const seen = new Set();
+  const reports = [
+    ...reportsSnapshot.docs.map((document) => adminReportResult(document, 'reports')),
+    ...moderationSnapshot.docs.map((document) => adminReportResult(document, 'moderationReports')),
+    ...eventReportsSnapshot.docs.map((document) => adminReportResult(document, 'eventReports')),
+  ].filter((item) => {
+    const key = item.sourcePath || `${item.source}:${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return !search || reportSearchText(item).includes(search);
+  }).sort((left, right) => {
+    const leftTime = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+    const rightTime = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+    return rightTime - leftTime;
+  }).slice(0, requestedLimit);
+  return { reports, total: reports.length };
 });
 
 export const getPortalAdminUserRecord = onCall(async (request) => {

@@ -217,7 +217,23 @@ describe('Portal Admin authentication', () => {
     expect(service).toContain("callPortalIdentity('searchPortalAdminNotifications'");
     expect(hookBlock).toContain("key === 'broadcastNotifications'");
     expect(hookBlock).toContain('searchPortalAdminNotifications(search, max)');
-    expect(adminSource).toContain("['users', 'broadcastNotifications'].includes(collectionKey) ? term : ''");
+    expect(adminSource).toContain("['users', 'broadcastNotifications', 'reports'].includes(collectionKey) ? term : ''");
+  });
+
+  it('loads Admin Reports through a server RBAC callable instead of direct Firestore reads', () => {
+    const adminSource = readFileSync(resolve('src/admin/AdminApp.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const functions = readFileSync(resolve('functions/index.js'), 'utf8');
+    const hookBlock = adminSource.match(/function useAdminCollection\([\s\S]*?\n}\n\nfunction valueForPath/)?.[0] || '';
+    expect(functions).toContain('export const searchPortalAdminReports = onCall');
+    expect(functions).toContain("requireAdminPermission(request, 'view_reports')");
+    expect(functions).toContain("db.collection('reports').orderBy('createdAt', 'desc')");
+    expect(functions).toContain("db.collection('moderationReports').orderBy('createdAt', 'desc')");
+    expect(functions).toContain("db.collectionGroup('reports').orderBy('createdAt', 'desc')");
+    expect(service).toContain("callPortalIdentity('searchPortalAdminReports'");
+    expect(hookBlock).toContain("key === 'reports'");
+    expect(hookBlock).toContain('searchPortalAdminReports(search, max)');
+    expect(adminSource).toContain("['users', 'broadcastNotifications', 'reports'].includes(collectionKey) ? term : ''");
   });
 
   it('hardens Admin V4 with server-enforced RBAC, approvals, audit and recovery surfaces', () => {
@@ -225,6 +241,9 @@ describe('Portal Admin authentication', () => {
     const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
     const functions = readFileSync(resolve('functions/index.js'), 'utf8');
     expect(functions).toContain('ADMIN_ROLE_PERMISSIONS');
+    expect(functions).toContain('normalizeAdminRole');
+    expect(functions).toContain("if (normalized === 'superadmin') return 'super_admin';");
+    expect(functions).toContain('replace(/[-\\s]+/g,');
     expect(functions).toContain('super_admin');
     expect(functions).toContain('trust_safety');
     expect(functions).toContain('verification_team');

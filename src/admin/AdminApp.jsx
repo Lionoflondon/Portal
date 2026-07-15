@@ -15,6 +15,7 @@ import {
   refundPlaceholderPortalHandlePurchase,
   reviewPortalHandleRequest,
   searchPortalAdminNotifications,
+  searchPortalAdminReports,
   searchPortalAdminUsers,
   sendPortalPasswordReset,
   signInPortalUser,
@@ -84,6 +85,13 @@ function useAdminCollection(key, search = '', max = 1000) {
       setLoading(true);
       const timer = window.setTimeout(() => {
         searchPortalAdminNotifications(search, max).then((result) => { setItems(result.notifications || []); setError(''); setLoading(false); }).catch((reason) => { setError(firebaseMessage(reason)); setLoading(false); });
+      }, 250);
+      return () => window.clearTimeout(timer);
+    }
+    if (key === 'reports') {
+      setLoading(true);
+      const timer = window.setTimeout(() => {
+        searchPortalAdminReports(search, max).then((result) => { setItems(result.reports || []); setError(''); setLoading(false); }).catch((reason) => { setError(firebaseMessage(reason)); setLoading(false); });
       }, 250);
       return () => window.clearTimeout(timer);
     }
@@ -526,7 +534,7 @@ function UserProfileDrawer({ user, loading, actions, onAction, onClose }) {
 
 function AdminDataTable({ title, description, searchPlaceholder, columns, rowFields = [], actions = [], queues = [], collectionKey, detailFields = [] }) {
   const [term, setTerm] = useState('');
-  const { items, error, loading } = useAdminCollection(collectionKey, ['users', 'broadcastNotifications'].includes(collectionKey) ? term : '');
+  const { items, error, loading } = useAdminCollection(collectionKey, ['users', 'broadcastNotifications', 'reports'].includes(collectionKey) ? term : '');
   const [selected, setSelected] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [notice, setNotice] = useState('');

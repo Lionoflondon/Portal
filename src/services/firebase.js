@@ -630,6 +630,7 @@ export function executePortalAdminAction(action, payload = {}) {
 }
 export function searchPortalAdminUsers(query = '', max = 1000) { return callPortalIdentity('searchPortalAdminUsers', { query, limit: max }); }
 export function searchPortalAdminNotifications(query = '', max = 100) { return callPortalIdentity('searchPortalAdminNotifications', { query, limit: max }); }
+export function searchPortalAdminReports(query = '', max = 250) { return callPortalIdentity('searchPortalAdminReports', { query, limit: max }); }
 export function getPortalAdminUserRecord(uid) { return callPortalIdentity('getPortalAdminUserRecord', { uid }); }
 export function managePortalAdminUser(action, payload = {}) { return callPortalIdentity('managePortalAdminUser', { action, ...payload }); }
 
