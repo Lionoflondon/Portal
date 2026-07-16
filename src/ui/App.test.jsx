@@ -110,6 +110,15 @@ describe('Portal app shell', () => {
     expect(eventsBlock).toContain('EventCollection');
   });
 
+  it('fails closed with a genuine-content empty state', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const collectionBlock = source.match(/function EventCollection\([\s\S]*?\n}\n\nfunction PostMedia/)?.[0] || '';
+    expect(collectionBlock).toContain('No verified source or Portal member event matches this view.');
+    expect(collectionBlock).toContain('New genuine events will appear here when they are published.');
+    expect(collectionBlock).not.toContain('demo');
+    expect(collectionBlock).not.toContain('placeholder');
+  });
+
 
   it('locks Portal Events to the world-timeline masonry model', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');

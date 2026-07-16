@@ -100,6 +100,20 @@ test('historical replay excludes future corrections and pagination is stable', (
 test('provider rollout policy blocks shadow providers and minor technology posts', () => {
   const candidate = normaliseCandidate({ provider: 'tech', providerItemId: 'minor', title: 'Small maintenance release', category: 'Technology' });
   assert.equal(shouldPublishCandidate(candidate, { rolloutStage: 'shadow' }), false);
-  assert.equal(shouldPublishCandidate(candidate, { significanceKeywords: ['security incident', 'major outage'] }), false);
-  assert.equal(shouldPublishCandidate(normaliseCandidate({ provider: 'tech', providerItemId: 'outage', title: 'Major outage affects platform', category: 'Technology' }), { significanceKeywords: ['major outage'] }), true);
+  const approved = { enabled: true, approvedForPublication: true, rolloutStage: 'production' };
+  assert.equal(shouldPublishCandidate(candidate, { ...approved, significanceKeywords: ['security incident', 'major outage'] }), false);
+  assert.equal(shouldPublishCandidate(normaliseCandidate({ provider: 'tech', providerItemId: 'outage', title: 'Major outage affects platform', category: 'Technology' }), { ...approved, significanceKeywords: ['major outage'] }), true);
+});
+
+test('placeholder incident feeds fail closed even when a provider is otherwise approved', () => {
+  const approved = { enabled: true, approvedForPublication: true, rolloutStage: 'production' };
+  for (const [providerItemId, title] of [
+    ['noda', 'M 4.6 - 47 km ENE of Noda, Japan'],
+    ['false-pass', 'M 5.3 - 96 km SE of False Pass, Alaska'],
+    ['loyalty', 'M 6.3 - southeast of the Loyalty Islands'],
+    ['generic', 'Magnitude 5 earthquake reported offshore'],
+  ]) {
+    const candidate = normaliseCandidate({ provider: 'incident-feed', providerItemId, title, category: 'Weather' });
+    assert.equal(shouldPublishCandidate(candidate, approved), false, title);
+  }
 });

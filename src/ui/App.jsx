@@ -263,7 +263,7 @@ function EventCollection({ events, loading, error, empty, onFollow, following = 
     const column = columns.reduce((shortest, candidate) => candidate.weight < shortest.weight ? candidate : shortest, columns[0]);
     column.events.push(event); column.weight += eventCardWeight(event) + 20;
   });
-  if (!events.length) return <div className="glass card empty-state"><h2 className="display-md">{empty}</h2><p className="body-sm">When something happens, Portal will give it a place in the world timeline.</p></div>;
+  if (!events.length) return <div className="glass card empty-state events-empty-state"><div className="icon-wrap"><Icon name="events" /></div><h2 className="display-md">{empty}</h2><p className="body-sm">No verified source or Portal member event matches this view. New genuine events will appear here when they are published.</p></div>;
   return <div className="event-masonry" style={{ '--event-columns': columnCount }} aria-label="Masonry event discovery grid">{columns.map((column, index) => <div className="event-masonry-column" key={`event-column-${index}`}>{column.events.map((event) => <EventCard key={event.id} event={event} follow={following.has(event.id)} onFollow={onFollow} />)}</div>)}</div>;
 }
 

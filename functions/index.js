@@ -26,32 +26,13 @@ const storage = getStorage();
 
 const PRODUCTION_PROVIDER_ROLLOUT = [
   {
-    id: 'usgs-earthquakes-4-5-day',
-    displayName: 'USGS Earthquakes 4.5+ Day Feed',
-    category: 'Weather',
-    kind: 'usgs-earthquake-geojson',
-    url: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson',
-    enabled: true,
-    rolloutStage: 'limited_publication',
-    publishMode: 'limited',
-    refreshIntervalMinutes: 30,
-    maxItems: 8,
-    minimumMagnitude: 4.5,
-    sourceTrust: { tier: 'official', reputation: 'high' },
-    region: 'World',
-    geographicScope: 'World',
-    rateLimit: { maxRequestsPerRun: 1 },
-    parsingVersion: 1,
-    healthState: 'configured',
-    legalNotes: 'USGS public earthquake feed; Portal stores metadata, concise summaries and links only.',
-  },
-  {
     id: 'github-blog-rss-shadow',
     displayName: 'GitHub Blog RSS',
     category: 'Technology',
     kind: 'rss',
     url: 'https://github.blog/feed/',
     enabled: false,
+    approvedForPublication: false,
     rolloutStage: 'shadow',
     publishMode: 'shadow',
     refreshIntervalMinutes: 120,
@@ -72,6 +53,7 @@ const PRODUCTION_PROVIDER_ROLLOUT = [
     kind: 'rss',
     url: 'https://www.nasa.gov/news-release/feed/',
     enabled: false,
+    approvedForPublication: false,
     rolloutStage: 'shadow',
     publishMode: 'shadow',
     refreshIntervalMinutes: 180,
@@ -435,31 +417,6 @@ function xmlTag(item, tag) {
 async function fetchProviderCandidates(provider) {
   if (!provider.enabled) return [];
   if (!provider.url) return [];
-  if (provider.kind === 'usgs-earthquake-geojson') {
-    const response = await fetch(provider.url);
-    if (!response.ok) throw new Error(`Provider ${provider.id} returned ${response.status}`);
-    const payload = await response.json();
-    const features = Array.isArray(payload.features) ? payload.features : [];
-    return features.slice(0, provider.maxItems || 10).map((feature) => {
-      const props = feature.properties || {};
-      const coordinates = feature.geometry?.coordinates ? { longitude: feature.geometry.coordinates[0], latitude: feature.geometry.coordinates[1], depthKm: feature.geometry.coordinates[2] } : null;
-      const magnitude = Number(props.mag || 0);
-      return normaliseCandidate({
-        provider: provider.id,
-        providerItemId: props.ids || feature.id || props.code || props.url,
-        title: props.title || `Magnitude ${magnitude} earthquake`,
-        summary: `${props.title || 'Earthquake'}${props.tsunami ? ' with tsunami alert metadata.' : '.'}`,
-        sourceUrl: props.url,
-        publishedAt: props.time ? new Date(props.time).toISOString() : null,
-        updatedAt: props.updated ? new Date(props.updated).toISOString() : null,
-        locationText: props.place || provider.defaultLocation || 'World',
-        coordinates,
-        category: 'Weather',
-        sourceTrust: provider.sourceTrust || { tier: 'official', reputation: 'high' },
-        structuredData: { magnitude, place: props.place || null, alert: props.alert || null, tsunami: Boolean(props.tsunami), status: props.status || null },
-      });
-    }).filter((candidate) => shouldPublishCandidate(candidate, provider));
-  }
   if (provider.kind === 'official-json') {
     const response = await fetch(provider.url);
     if (!response.ok) throw new Error(`Provider ${provider.id} returned ${response.status}`);
@@ -637,9 +594,11 @@ function shouldRunProvider(provider = {}) {
 async function runGlobalEventsIngestion({ providerLimit = 10 } = {}) {
   await ensureProductionProviders();
   const providersSnapshot = await db.collection('ingestionProviders').where('enabled', '==', true).limit(10).get();
-  const runRef = await db.collection('ingestionRuns').add({ status: 'running', providerCount: providersSnapshot.size, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+  const approvedProviderIds = new Set(PRODUCTION_PROVIDER_ROLLOUT.filter((provider) => provider.enabled && provider.approvedForPublication === true && provider.rolloutStage === 'production').map((provider) => provider.id));
+  const providerDocs = providersSnapshot.docs.filter((provider) => approvedProviderIds.has(provider.id));
+  const runRef = await db.collection('ingestionRuns').add({ status: 'running', providerCount: providerDocs.length, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
   let candidateCount = 0; let errorCount = 0; let createdCount = 0; let attachedCount = 0; let reviewCount = 0; let skippedCount = 0;
-  for (const providerDoc of providersSnapshot.docs.slice(0, providerLimit)) {
+  for (const providerDoc of providerDocs.slice(0, providerLimit)) {
     const provider = { id: providerDoc.id, ...providerDoc.data() };
     try {
       if (!shouldRunProvider(provider)) {

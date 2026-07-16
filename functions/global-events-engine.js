@@ -21,6 +21,13 @@ export const TIMELINE_ENTRY_TYPES = [
 ];
 
 const STOP_WORDS = new Set(['a', 'an', 'and', 'at', 'for', 'from', 'in', 'into', 'of', 'on', 'the', 'to', 'with']);
+const BLOCKED_PLACEHOLDER_PATTERNS = [
+  /\bearthquake\b/i,
+  /^m\s+\d+(?:\.\d+)?\s*-/i,
+  /\bnoda,? japan\b/i,
+  /\bfalse pass,? alaska\b/i,
+  /\bloyalty islands\b/i,
+];
 
 export function normaliseEventText(value = '') {
   return String(value)
@@ -117,6 +124,9 @@ export function isMeaningfulEventChange(change = {}) {
 }
 
 export function shouldPublishCandidate(candidate = {}, provider = {}) {
+  const candidateText = `${candidate.provider || ''} ${candidate.sourceName || ''} ${candidate.title || ''} ${candidate.summary || ''} ${candidate.sourceUrl || ''}`;
+  if (BLOCKED_PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(candidateText))) return false;
+  if (provider.approvedForPublication !== true || provider.rolloutStage !== 'production' || provider.enabled !== true) return false;
   if (provider.rolloutStage === 'shadow') return false;
   if (provider.publishMode === 'shadow') return false;
   const title = normaliseEventText(`${candidate.title} ${candidate.summary}`);
