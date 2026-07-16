@@ -28,6 +28,31 @@ describe('Portal app shell', () => {
     expect(EVENTS_UNAVAILABLE_MESSAGE).toBe('Events are temporarily unavailable. Please try again shortly.');
   });
 
+  it('does not ship hardcoded fake Events in the public Portal UI', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const eventsBlock = source.match(/function Events\([\s\S]*?\n}\n\nfunction EventDetail/)?.[0] || '';
+    expect(service).toContain("collection(requireService(portalDb, 'Firestore'), 'events')");
+    expect(eventsBlock).toContain('No live events available.');
+    expect(eventsBlock).toContain('Events will appear as trusted sources become available.');
+    expect(eventsBlock).toContain('onRefresh={() => window.location.reload()}');
+    expect(source).not.toMatch(/const\s+(mock|demo|sample|seed|fake)Events\s*=/i);
+    expect(eventsBlock).not.toContain('Example event');
+    expect(eventsBlock).not.toContain('Nothing matching this view yet');
+  });
+
+  it('routes production media through the shared Portal media components', () => {
+    const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
+    const service = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const mediaUi = readFileSync(resolve('src/ui/Media.jsx'), 'utf8');
+    expect(source).toContain("import { PortalMedia, UnavailableMedia } from './Media.jsx';");
+    expect(source).toContain('<PortalMedia asset={photo}');
+    expect(source).toContain('<UnavailableMedia label="Media unavailable"');
+    expect(service).toContain("from './media.js'");
+    expect(service).not.toContain('uploadBytesResumable');
+    expect(mediaUi).toContain('normalizeMediaAsset');
+  });
+
   it('keeps the handle choice empty until the member provides one', () => {
     expect(PROFILE_HANDLE_PLACEHOLDER).toBe('Choose your unique handle');
   });
@@ -113,8 +138,9 @@ describe('Portal app shell', () => {
   it('fails closed with a genuine-content empty state', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const collectionBlock = source.match(/function EventCollection\([\s\S]*?\n}\n\nfunction PostMedia/)?.[0] || '';
-    expect(collectionBlock).toContain('No live events available.');
-    expect(collectionBlock).toContain('Events will appear as trusted sources become available.');
+    const eventsBlock = source.match(/function Events\([\s\S]*?\n}\n\nfunction EventDetail/)?.[0] || '';
+    expect(eventsBlock).toContain('No live events available.');
+    expect(eventsBlock).toContain('Events will appear as trusted sources become available.');
     expect(collectionBlock).not.toContain('demo');
     expect(collectionBlock).not.toContain('placeholder');
   });
@@ -391,10 +417,12 @@ describe('Portal app shell', () => {
     expect(mediaBlock).toContain('Attached link');
     expect(mediaBlock).toContain('poll-option');
     const serviceSource = readFileSync(resolve('src/services/firebase.js'), 'utf8');
+    const mediaServiceSource = readFileSync(resolve('src/services/media.js'), 'utf8');
     const functionsSource = readFileSync(resolve('functions/index.js'), 'utf8');
-    expect(serviceSource).toContain('customMetadata');
-    expect(serviceSource).toContain('originalName');
-    expect(serviceSource).toContain("name: file.name || 'media'");
+    expect(serviceSource).toContain('uploadMediaFile');
+    expect(mediaServiceSource).toContain('customMetadata');
+    expect(mediaServiceSource).toContain('originalName');
+    expect(mediaServiceSource).toContain("name: file.name || 'media'");
     expect(functionsSource).toContain("name: String(item.name || '').slice(0, 160)");
     expect(functionsSource).toContain("name: String(videoInput.name || '').slice(0, 160)");
   });

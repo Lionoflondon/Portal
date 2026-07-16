@@ -32,8 +32,15 @@ import {
   where,
   limit,
 } from 'firebase/firestore';
-import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage';
+import { getStorage } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import {
+  extractRichLinkPreview,
+  safeFileName,
+  uploadMediaFile,
+  validateHttpsUrl,
+  validateMediaFile,
+} from './media.js';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -131,14 +138,16 @@ export async function updatePortalProfile(user, { displayName, emailUpdates, bio
 }
 
 export function uploadPortalProfilePhoto(user, file, onProgress, kind = 'profile') {
-  if (!file?.type?.startsWith('image/')) throw new Error('Choose an image file for your profile photo.');
-  if (file.size > 10 * 1024 * 1024) throw new Error('Profile photos must be 10 MB or smaller.');
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-').slice(-100) || 'photo';
-  const path = `users/${user.uid}/private/${kind}/${Date.now()}-${safeName}`;
-  const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, { contentType: file.type });
-  return new Promise((resolve, reject) => task.on('state_changed', (snapshot) => onProgress?.(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
-    try { resolve(await getDownloadURL(task.snapshot.ref)); } catch (error) { reject(error); }
-  }));
+  validateMediaFile(file, 'profile');
+  const path = `users/${user.uid}/private/${kind}/${Date.now()}-${safeFileName(file)}`;
+  return uploadMediaFile({
+    storage: requireService(portalStorage, 'Storage'),
+    path,
+    file,
+    context: 'profile',
+    ownerUid: user.uid,
+    onProgress,
+  }).then((asset) => asset.url);
 }
 
 export function changePortalPassword(password) {
@@ -174,6 +183,7 @@ export function observeEvent(eventId, callback, onError) {
 export async function createPortalEvent(user, values) {
   const eventStatus = values.status || (values.date || values.time ? 'Upcoming' : 'Live');
   const startTime = values.date || values.time ? Timestamp.fromDate(new Date(`${values.date || new Date().toISOString().slice(0, 10)}T${values.time || '00:00'}`)) : serverTimestamp();
+  const heroImageUrl = values.heroImageUrl ? validateHttpsUrl(values.heroImageUrl).toString() : '';
   return addDoc(collection(requireService(portalDb, 'Firestore'), 'events'), {
     title: values.title.trim(),
     summary: (values.summary || values.description || '').trim(),
@@ -183,8 +193,8 @@ export async function createPortalEvent(user, values) {
     category: values.category || values.eventType || 'Other',
     locationSummary: values.location || '',
     primaryLocation: values.location || '',
-    heroImageUrl: values.heroImageUrl || '',
-    mediaPreview: values.heroImageUrl ? { url: values.heroImageUrl, type: 'image' } : null,
+    heroImageUrl,
+    mediaPreview: heroImageUrl ? { url: heroImageUrl, type: 'image' } : null,
     automaticGpsRequested: Boolean(values.automaticGps),
     date: values.date || '',
     time: values.time || '',
@@ -197,7 +207,7 @@ export async function createPortalEvent(user, values) {
     updateCount: 1,
     viewCount: 0,
     shareCount: 0,
-    media: { photoCount: values.photoCount || (values.heroImageUrl ? 1 : 0), hasVideo: Boolean(values.videoCount) },
+    media: { photoCount: values.photoCount || (heroImageUrl ? 1 : 0), hasVideo: Boolean(values.videoCount) },
     publishedAt: serverTimestamp(),
     createdBy: user.uid,
     authorUid: user.uid,
@@ -208,6 +218,8 @@ export async function createPortalEvent(user, values) {
 }
 
 export function updatePortalEvent(eventId, values) {
+  const heroImageUrl = values.heroImageUrl || values.heroImageUrl === '' ? values.heroImageUrl : values.existingHeroImageUrl || '';
+  const safeHeroImageUrl = heroImageUrl ? validateHttpsUrl(heroImageUrl).toString() : '';
   return updateDoc(doc(requireService(portalDb, 'Firestore'), 'events', eventId), {
     title: values.title.trim(),
     summary: (values.summary || values.description || '').trim(),
@@ -217,8 +229,8 @@ export function updatePortalEvent(eventId, values) {
     category: values.category || values.eventType || 'Other',
     locationSummary: values.location || values.locationSummary || '',
     primaryLocation: values.location || values.primaryLocation || '',
-    heroImageUrl: values.heroImageUrl || values.heroImageUrl === '' ? values.heroImageUrl : values.existingHeroImageUrl || '',
-    mediaPreview: values.heroImageUrl ? { url: values.heroImageUrl, type: 'image' } : values.mediaPreview || null,
+    heroImageUrl: safeHeroImageUrl,
+    mediaPreview: safeHeroImageUrl ? { url: safeHeroImageUrl, type: 'image' } : values.mediaPreview || null,
     date: values.date || '',
     time: values.time || '',
     visibility: values.visibility || 'public',
@@ -229,6 +241,7 @@ export function updatePortalEvent(eventId, values) {
 
 export async function uploadPortalEventCover(user, draftId, file, onProgress) {
   if (!file) return null;
+  validateMediaFile(file, 'event');
   if (!file.type.startsWith('image/') || file.size > 25 * 1024 * 1024) throw new Error('Event cover must be an image under 25 MB.');
   const prepared = await compressImage(file);
   const uploaded = await uploadPostFile(user, draftId, prepared, 'event-cover', onProgress);
@@ -276,11 +289,6 @@ export function createPortalReport(user, eventId, values) {
   });
 }
 
-function safeFileName(file) {
-  const extension = file.name.includes('.') ? `.${file.name.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '')}` : '';
-  return `${crypto.randomUUID()}${extension}`;
-}
-
 async function compressImage(file) {
   if (!file.type.startsWith('image/') || file.size < 900 * 1024 || typeof document === 'undefined') return file;
   const bitmap = await createImageBitmap(file);
@@ -296,14 +304,14 @@ async function compressImage(file) {
 
 function uploadPostFile(user, draftId, file, kind, onProgress) {
   const path = `post-media/${user.uid}/${draftId}/${kind}-${safeFileName(file)}`;
-  const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, {
-    contentType: file.type,
-    customMetadata: { ownerUid: user.uid, draftId, originalName: file.name || 'media' },
-  });
-  return new Promise((resolve, reject) => {
-    task.on('state_changed', (snapshot) => onProgress?.(kind, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
-      try { resolve({ url: await getDownloadURL(task.snapshot.ref), path, contentType: file.type, size: file.size, name: file.name || 'media' }); } catch (error) { reject(error); }
-    });
+  return uploadMediaFile({
+    storage: requireService(portalStorage, 'Storage'),
+    path,
+    file,
+    context: 'post',
+    ownerUid: user.uid,
+    metadata: { draftId },
+    onProgress: (amount) => onProgress?.(kind, amount),
   });
 }
 
@@ -311,13 +319,16 @@ export async function uploadPortalPostMedia(user, draftId, { photos = [], video 
   if (photos.length > 10) throw new Error('Posts support up to 10 photos.');
   const preparedPhotos = [];
   for (const [index, photo] of photos.entries()) {
-    if (!photo.type.startsWith('image/') || photo.size > 25 * 1024 * 1024) throw new Error('Photos must be image files under 25 MB.');
+    validateMediaFile(photo, 'post');
+    if (!photo.type.startsWith('image/')) throw new Error('Photos must be image files.');
+    if (photo.size > 25 * 1024 * 1024) throw new Error('Photos must be image files under 25 MB.');
     const compressed = await compressImage(photo);
     preparedPhotos.push({ ...(await uploadPostFile(user, draftId, compressed, `photo-${index + 1}`, onProgress)), width: 0, height: 0 });
   }
   let preparedVideo = null;
   if (video) {
-    if (!video.type.startsWith('video/') || video.size > 100 * 1024 * 1024) throw new Error('Videos must be video files under 100 MB.');
+    validateMediaFile(video, 'post');
+    if (!video.type.startsWith('video/')) throw new Error('Videos must be video files.');
     preparedVideo = await uploadPostFile(user, draftId, video, 'video', onProgress);
   }
   return { photos: preparedPhotos, video: preparedVideo };
@@ -325,16 +336,15 @@ export async function uploadPortalPostMedia(user, draftId, { photos = [], video 
 
 function uploadEvidence(user, eventId, reportId, file, kind, onProgress) {
   if (!file) return Promise.resolve(null);
-  const task = uploadBytesResumable(
-    ref(requireService(portalStorage, 'Storage'), `event-media/${eventId}/${user.uid}/${reportId}-${kind}-${safeFileName(file)}`),
+  return uploadMediaFile({
+    storage: requireService(portalStorage, 'Storage'),
+    path: `event-media/${eventId}/${user.uid}/${reportId}-${kind}-${safeFileName(file)}`,
     file,
-    { contentType: file.type },
-  );
-  return new Promise((resolve, reject) => {
-    task.on('state_changed', (snapshot) => onProgress?.(kind, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
-      try { resolve(await getDownloadURL(task.snapshot.ref)); } catch (error) { reject(error); }
-    });
-  });
+    context: 'event',
+    ownerUid: user.uid,
+    metadata: { eventId, reportId },
+    onProgress: (amount) => onProgress?.(kind, amount),
+  }).then((asset) => asset.url);
 }
 
 export async function publishPortalReport(user, values, onProgress) {
@@ -534,25 +544,21 @@ export async function markAllPortalNotificationsRead(uid, notifications) {
 }
 
 function extractLinkPreview(text) {
-  const url = text.match(/https?:\/\/[^\s]+/i)?.[0];
-  if (!url) return null;
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, '');
-    return { url, title: host, description: 'Link shared in Portal Messages' };
-  } catch {
-    return null;
-  }
+  return extractRichLinkPreview(text);
 }
 
 export function uploadPortalMessageMedia(user, conversationId, file, onProgress) {
-  if (!file?.type?.startsWith('image/') && !file?.type?.startsWith('video/')) throw new Error('Messages support photos and videos.');
-  if (file.size > 50 * 1024 * 1024) throw new Error('Message media must be 50 MB or smaller.');
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-').slice(-100) || 'media';
-  const path = `messages/${conversationId}/${user.uid}/${Date.now()}-${safeName}`;
-  const task = uploadBytesResumable(ref(requireService(portalStorage, 'Storage'), path), file, { contentType: file.type });
-  return new Promise((resolve, reject) => task.on('state_changed', (snapshot) => onProgress?.(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)), reject, async () => {
-    try { resolve({ url: await getDownloadURL(task.snapshot.ref), type: file.type, path }); } catch (error) { reject(error); }
-  }));
+  validateMediaFile(file, 'message');
+  const path = `messages/${conversationId}/${user.uid}/${Date.now()}-${safeFileName(file)}`;
+  return uploadMediaFile({
+    storage: requireService(portalStorage, 'Storage'),
+    path,
+    file,
+    context: 'message',
+    ownerUid: user.uid,
+    metadata: { conversationId },
+    onProgress,
+  });
 }
 
 export function observeIngestionProviders(callback, onError) {
