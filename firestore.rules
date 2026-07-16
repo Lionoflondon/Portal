@@ -18,6 +18,48 @@ service cloud.firestore {
       return signedIn() && resource.data.createdBy == request.auth.uid;
     }
 
+    function validEventLifecycleCreate() {
+      return request.resource.data.startAt is timestamp
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.resource.data.startAt
+        && request.resource.data.lifecycleState in ['Scheduled', 'Live', 'Ending'];
+    }
+
+    function eventIsHistorical() {
+      return resource.data.lifecycleState in ['Canonised', 'Archived']
+        || resource.data.canonised == true
+        || resource.data.socialLocked == true;
+    }
+
+    function eventUpdateDoesNotControlLifecycle() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'startAt',
+        'expiresAt',
+        'lifecycleState',
+        'canonised',
+        'canonisedAt',
+        'archived',
+        'archivedAt',
+        'socialLocked',
+        'immutable',
+        'finalStatistics',
+        'historicalMetadata',
+        'lockedFields',
+        'liveFeedEligible',
+        'currentEventEligible',
+        'recommendationEligible',
+        'commentsEnabled',
+        'repliesEnabled',
+        'reactionsEnabled',
+        'mediaUploadsEnabled',
+        'timelineEditsEnabled',
+        'metadataEditsEnabled',
+        'creatorEditsEnabled',
+        'notificationsEnabled',
+        'liveMapEnabled'
+      ]);
+    }
+
     match /users/{uid} {
       allow create: if isOwner(uid)
         && request.resource.data.keys().hasOnly(['displayName', 'email', 'preferences', 'createdAt', 'updatedAt']);
@@ -101,21 +143,33 @@ service cloud.firestore {
     match /handleRiskSignals/{signalId} { allow read, write: if false; }
 
     match /marketplaceConfig/{configId} { allow read, write: if false; }
+    match /platformConfig/{configId} {
+      allow read: if isPrivilegedPortalOperator();
+      allow write: if false;
+    }
     match /auditLogs/{auditId} { allow read, write: if false; }
 
     match /events/{eventId} {
       allow read: if signedIn();
       allow create: if signedIn()
         && request.resource.data.createdBy == request.auth.uid
-        && request.resource.data.archived == false;
-      allow update, delete: if isEventCreator();
+        && request.resource.data.archived == false
+        && validEventLifecycleCreate();
+      allow update: if isEventCreator()
+        && !eventIsHistorical()
+        && eventUpdateDoesNotControlLifecycle();
+      allow delete: if false;
 
       match /reports/{reportId} {
         allow read: if signedIn();
         allow create: if signedIn()
-          && request.resource.data.createdBy == request.auth.uid;
+          && request.resource.data.createdBy == request.auth.uid
+          && !(get(/databases/$(database)/documents/events/$(eventId)).data.lifecycleState in ['Canonised', 'Archived'])
+          && get(/databases/$(database)/documents/events/$(eventId)).data.socialLocked != true;
         allow update, delete: if signedIn()
-          && resource.data.createdBy == request.auth.uid;
+          && resource.data.createdBy == request.auth.uid
+          && !(get(/databases/$(database)/documents/events/$(eventId)).data.lifecycleState in ['Canonised', 'Archived'])
+          && get(/databases/$(database)/documents/events/$(eventId)).data.socialLocked != true;
       }
     }
 
@@ -140,6 +194,11 @@ service cloud.firestore {
     }
 
     match /eventRelationships/{relationshipId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /historicalEvents/{eventId} {
       allow read: if signedIn();
       allow write: if false;
     }

@@ -54,10 +54,23 @@ describe('Portal Firebase rules', () => {
     const maya = testEnv.authenticatedContext('maya');
     const anon = testEnv.unauthenticatedContext();
     const event = doc(jason.firestore(), 'events/event-1');
-    await assertSucceeds(setDoc(event, { title: 'Portal event', summary: 'A real verified happening.', status: 'Developing', archived: false, createdBy: 'jason' }));
+    await assertSucceeds(setDoc(event, { title: 'Portal event', summary: 'A real verified happening.', status: 'Developing', lifecycleState: 'Live', startAt: new Date('2026-07-16T10:00:00Z'), expiresAt: new Date('2026-07-17T10:00:00Z'), archived: false, createdBy: 'jason' }));
     await assertSucceeds(getDoc(doc(maya.firestore(), 'events/event-1')));
     await assertFails(setDoc(doc(maya.firestore(), 'events/event-1'), { title: 'Changed by Maya' }, { merge: true }));
+    await assertFails(setDoc(doc(jason.firestore(), 'events/event-no-expiry'), { title: 'No expiry', summary: 'Invalid', status: 'Developing', archived: false, createdBy: 'jason' }));
+    await assertFails(updateDoc(event, { lifecycleState: 'Canonised' }));
     await assertFails(getDoc(doc(anon.firestore(), 'events/event-1')));
+  });
+
+  it('locks canonised historical Events from ordinary edits and contributions', async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'events/historical-1'), { title: 'Historical event', lifecycleState: 'Canonised', canonised: true, socialLocked: true, archived: true, createdBy: 'jason-history', startAt: new Date('2026-07-01T10:00:00Z'), expiresAt: new Date('2026-07-02T10:00:00Z') });
+      await setDoc(doc(context.firestore(), 'historicalEvents/historical-1'), { eventId: 'historical-1', title: 'Historical event', archiveYear: 2026 });
+    });
+    const jason = testEnv.authenticatedContext('jason-history');
+    await assertSucceeds(getDoc(doc(jason.firestore(), 'historicalEvents/historical-1')));
+    await assertFails(updateDoc(doc(jason.firestore(), 'events/historical-1'), { title: 'Rewrite history' }));
+    await assertFails(setDoc(doc(jason.firestore(), 'events/historical-1/reports/report-1'), { createdBy: 'jason-history', body: 'Late comment' }));
   });
 
   it('only accepts authenticated, owned media uploads', async () => {

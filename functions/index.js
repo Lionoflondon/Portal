@@ -18,6 +18,18 @@ import { echoKey, echoNotificationId, isEchoablePost, nextEchoCount } from './ec
 import { PlaceholderPaymentProvider, activePaymentProvider, calculateCommission, marketplacePaymentProvider, marketplaceStateForHandle, mayBeginCheckout, mayListHandle, mayTransfer, pricingForHandle, thirdPartyHandleSalesEnabled } from './marketplace-engine.js';
 import { confidenceFromSignals, dedupeDecision, initialStatusForCandidate, isMeaningfulEventChange, normaliseCandidate, shouldPublishCandidate, timelineEntryId } from './global-events-engine.js';
 import { normaliseViewerKey, safeDeviceType, shouldCountView } from './post-view-engine.js';
+import {
+  archiveSearchMetadata,
+  assertOneWayTransition,
+  canonisationPatch,
+  computeExpiresAt,
+  computeStartAt,
+  isCanonised,
+  isSocialLocked,
+  lifecycleForEvent,
+  ordinaryEditAllowed,
+  overrideAuditPayload,
+} from './historical-canonisation-engine.js';
 
 initializeApp();
 setGlobalOptions({ region: 'europe-west2' });
@@ -84,6 +96,105 @@ async function countEventActivity(eventId) {
     officialSourceCount: sourceDocs.filter((item) => item.sourceTrust?.tier === 'official').length,
     followerCount: followers.data().count,
   };
+}
+
+async function lifecycleConfig() {
+  const snapshot = await db.collection('platformConfig').doc('eventLifecycle').get();
+  return snapshot.exists ? snapshot.data() || {} : {};
+}
+
+async function finalEventStatistics(eventId) {
+  const counts = await countEventActivity(eventId);
+  const timeline = await db.collection('eventTimeline').where('eventId', '==', eventId).count().get();
+  const relationships = await db.collection('eventRelationships').where('fromEventId', '==', eventId).count().get();
+  return {
+    ...counts,
+    timelineEntryCount: timeline.data().count,
+    relationshipCount: relationships.data().count,
+    finalisedAt: new Date().toISOString(),
+  };
+}
+
+function publicLifecyclePatch(event = {}, config = {}, now = new Date()) {
+  const startAt = computeStartAt(event, now);
+  const expiresAt = computeExpiresAt({ ...event, startAt }, config, now);
+  const lifecycleState = lifecycleForEvent({ ...event, startAt, expiresAt }, now);
+  return { startAt, expiresAt, lifecycleState };
+}
+
+async function appendTimelineEntry(transaction, eventId, type, content, extra = {}) {
+  const entryRef = db.collection('eventTimeline').doc();
+  transaction.set(entryRef, {
+    entryId: entryRef.id,
+    eventId,
+    entryType: type,
+    eventTimestamp: extra.eventTimestamp || new Date(),
+    publicationTimestamp: FieldValue.serverTimestamp(),
+    ingestionTimestamp: FieldValue.serverTimestamp(),
+    sequence: extra.sequence || 0,
+    source: extra.source || 'Portal',
+    authorUid: extra.authorUid || null,
+    handleSnapshot: extra.handleSnapshot || null,
+    content,
+    structuredData: extra.structuredData || null,
+    confidenceLabel: extra.confidenceLabel || 'Emerging',
+    moderationState: 'approved',
+    correctionTargetId: extra.correctionTargetId || null,
+    supersedesEntryId: extra.supersedesEntryId || null,
+    supersededByEntryId: null,
+    media: extra.media || [],
+    sourceAttribution: extra.sourceAttribution || null,
+    geography: extra.geography || null,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  return entryRef.id;
+}
+
+async function canoniseEvent(eventRef, reason = 'expiry_reached') {
+  const stats = await finalEventStatistics(eventRef.id);
+  let outcome = null;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(eventRef);
+    if (!snapshot.exists) return;
+    const event = { id: eventRef.id, ...snapshot.data() };
+    if (isCanonised(event)) { outcome = { eventId: eventRef.id, canonised: false, alreadyCanonised: true }; return; }
+    const now = new Date();
+    const patch = canonisationPatch(event, stats, now);
+    transaction.set(eventRef, {
+      ...patch,
+      archivedAt: FieldValue.serverTimestamp(),
+      canonisedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(db.collection('historicalEvents').doc(eventRef.id), {
+      eventId: eventRef.id,
+      title: event.title || '',
+      summary: event.summary || event.description || '',
+      startAt: patch.startAt,
+      expiresAt: patch.expiresAt,
+      canonisedAt: FieldValue.serverTimestamp(),
+      lifecycleState: 'Canonised',
+      category: event.category || event.eventType || 'Other',
+      country: event.country || null,
+      city: event.city || event.locationSummary || null,
+      parentEventId: event.parentEventId || null,
+      childEventIds: event.childEventIds || [],
+      relatedEventIds: event.relatedEventIds || [],
+      storyGraphEventIds: event.storyGraphEventIds || [eventRef.id],
+      statistics: stats,
+      historicalMetadata: patch.historicalMetadata,
+      permanentUrl: patch.historicalMetadata.permanentUrl,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(db.collection('eventStatusHistory').doc(), { eventId: eventRef.id, status: 'Canonised', reason, actorType: 'system', createdAt: FieldValue.serverTimestamp() });
+    transaction.set(db.collection('auditLogs').doc(), { system: 'portal_historical_canonisation', action: 'event_canonised', entityType: 'event', eventId: eventRef.id, reason, statistics: stats, immutable: true, createdAt: FieldValue.serverTimestamp() });
+    appendTimelineEntry(transaction, eventRef.id, 'event_archived', 'Event canonised into Portal Historical Archive.', { confidenceLabel: event.confidenceLabel || 'Confirmed' });
+    outcome = { eventId: eventRef.id, canonised: true };
+  });
+  if (outcome?.canonised) await removeEntry('Event', eventRef.id).catch(() => {});
+  return outcome;
 }
 
 async function removeEntry(type, sourceId) {
@@ -180,6 +291,100 @@ export const projectPortalQuoteEcho = onDocumentWritten('quoteEchoes/{quoteEchoI
   const quote = event.data.after.data();
   const entry = makeEntry({ type: 'Quote Echo', sourceId: event.params.quoteEchoId, source: { ...quote, title: quote.quoteText, body: quote.quoteText }, counts: { contributionCount: 1 } });
   await entryRef.set({ ...entry, sourcePostId: quote.sourcePostId, originalAuthorUid: quote.originalAuthorUid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+});
+
+function eventInput(data = {}) {
+  const title = String(data.title || '').trim();
+  const description = String(data.description || data.summary || '').trim();
+  if (title.length < 3 || title.length > 180) throw new HttpsError('invalid-argument', 'Event title must be 3-180 characters.');
+  if (description.length > 4000) throw new HttpsError('invalid-argument', 'Event description is too long.');
+  const date = String(data.date || '').trim();
+  const time = String(data.time || '').trim();
+  const startAt = data.startAt ? new Date(data.startAt) : date || time ? new Date(`${date || new Date().toISOString().slice(0, 10)}T${time || '00:00'}`) : new Date();
+  if (Number.isNaN(startAt.getTime())) throw new HttpsError('invalid-argument', 'Choose a valid Event start time.');
+  const expiresAt = data.expiresAt ? new Date(data.expiresAt) : null;
+  if (expiresAt && Number.isNaN(expiresAt.getTime())) throw new HttpsError('invalid-argument', 'Choose a valid Event expiry time.');
+  if (expiresAt && expiresAt <= startAt) throw new HttpsError('invalid-argument', 'Event expiry must be after the start time.');
+  const eventType = String(data.eventType || data.category || 'Other').trim().slice(0, 80) || 'Other';
+  const heroImageUrl = String(data.heroImageUrl || '').trim().slice(0, 700);
+  if (heroImageUrl && !heroImageUrl.startsWith('https://')) throw new HttpsError('invalid-argument', 'Event cover media must use a secure URL.');
+  return {
+    title,
+    summary: description,
+    description,
+    eventType,
+    category: String(data.category || eventType).trim().slice(0, 80) || eventType,
+    locationSummary: String(data.location || data.locationSummary || '').trim().slice(0, 160),
+    primaryLocation: String(data.location || data.primaryLocation || '').trim().slice(0, 160),
+    heroImageUrl,
+    date,
+    time,
+    startAt,
+    expiresAt,
+    visibility: ['public', 'followers', 'private'].includes(String(data.visibility || '').toLowerCase()) ? String(data.visibility).toLowerCase() : 'public',
+    parentEventId: data.parentEventId ? String(data.parentEventId).trim() : null,
+    tags: Array.isArray(data.tags) ? data.tags.map((item) => String(item).trim().toLowerCase()).filter(Boolean).slice(0, 20) : [],
+  };
+}
+
+export const createPortalEvent = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const input = eventInput(request.data || {});
+  const config = await lifecycleConfig();
+  const lifecycle = publicLifecyclePatch(input, config);
+  const eventRef = db.collection('events').doc();
+  await eventRef.set({
+    ...input,
+    eventId: eventRef.id,
+    status: lifecycle.lifecycleState === 'Scheduled' ? 'Upcoming' : 'Live',
+    lifecycleState: lifecycle.lifecycleState,
+    startAt: lifecycle.startAt,
+    startTime: lifecycle.startAt,
+    expiresAt: lifecycle.expiresAt,
+    mediaPreview: input.heroImageUrl ? { url: input.heroImageUrl, type: 'image' } : null,
+    archived: false,
+    canonised: false,
+    socialLocked: false,
+    liveFeedEligible: lifecycle.lifecycleState !== 'Scheduled',
+    currentEventEligible: true,
+    recommendationEligible: true,
+    moderationState: 'approved',
+    followerCount: 0,
+    updateCount: 1,
+    viewCount: 0,
+    shareCount: 0,
+    media: { photoCount: input.heroImageUrl ? 1 : 0, hasVideo: false },
+    publishedAt: FieldValue.serverTimestamp(),
+    createdBy: uid,
+    authorUid: uid,
+    organiserUid: uid,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+    lastMeaningfulUpdateAt: FieldValue.serverTimestamp(),
+  });
+  await db.collection('eventStatusHistory').add({ eventId: eventRef.id, status: lifecycle.lifecycleState, reason: 'event_created', actorType: 'user', actorUid: uid, createdAt: FieldValue.serverTimestamp() });
+  await db.collection('auditLogs').add({ system: 'portal_historical_canonisation', action: 'event_created_with_expiry', entityType: 'event', eventId: eventRef.id, actorUid: uid, startAt: lifecycle.startAt, expiresAt: lifecycle.expiresAt, lifecycleState: lifecycle.lifecycleState, immutable: true, createdAt: FieldValue.serverTimestamp() });
+  return { id: eventRef.id, eventId: eventRef.id, startAt: lifecycle.startAt.toISOString(), expiresAt: lifecycle.expiresAt.toISOString(), lifecycleState: lifecycle.lifecycleState };
+});
+
+export const updatePortalEvent = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const eventId = String(request.data?.eventId || '').trim();
+  if (!eventId) throw new HttpsError('invalid-argument', 'Choose an Event to update.');
+  const input = eventInput(request.data || {});
+  const config = await lifecycleConfig();
+  const eventRef = db.collection('events').doc(eventId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(eventRef);
+    if (!snapshot.exists) throw new HttpsError('not-found', 'Event not found.');
+    const current = snapshot.data();
+    if (current.createdBy !== uid && current.organiserUid !== uid) throw new HttpsError('permission-denied', 'Only the Event organiser can update this Event.');
+    if (isCanonised(current) || isSocialLocked(current)) throw new HttpsError('failed-precondition', 'This Event is a historical record and cannot be edited.');
+    const lifecycle = publicLifecyclePatch({ ...current, ...input }, config);
+    if (!assertOneWayTransition(current.lifecycleState || 'Live', lifecycle.lifecycleState)) throw new HttpsError('failed-precondition', 'Event lifecycle cannot move backwards.');
+    transaction.set(eventRef, { ...input, status: lifecycle.lifecycleState === 'Scheduled' ? 'Upcoming' : current.status || 'Live', lifecycleState: lifecycle.lifecycleState, startAt: lifecycle.startAt, startTime: lifecycle.startAt, expiresAt: lifecycle.expiresAt, mediaPreview: input.heroImageUrl ? { url: input.heroImageUrl, type: 'image' } : null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  });
+  return { eventId, updated: true };
 });
 
 export const createPortalPost = onCall(async (request) => {
@@ -475,6 +680,9 @@ async function upsertCandidate(candidate, provider) {
   }
   const storyPeerEventId = decision.action === 'cluster_story' ? decision.eventId : null;
   const eventRef = db.collection('events').doc();
+  const config = await lifecycleConfig();
+  const candidateStartAt = candidate.publishedAt ? new Date(candidate.publishedAt) : new Date();
+  const lifecycle = publicLifecyclePatch({ startAt: candidateStartAt, eventType: candidate.category || provider.defaultCategory || 'World', category: candidate.category || provider.defaultCategory || 'World' }, config);
   await db.runTransaction(async (transaction) => {
     const eventSnapshot = await transaction.get(eventRef);
     const now = FieldValue.serverTimestamp();
@@ -484,7 +692,10 @@ async function upsertCandidate(candidate, provider) {
         summary: candidate.summary,
         status: initialStatusForCandidate(candidate),
         category: candidate.category || 'World',
-        startTime: candidate.publishedAt ? new Date(candidate.publishedAt) : now,
+        lifecycleState: lifecycle.lifecycleState,
+        startAt: lifecycle.startAt,
+        expiresAt: lifecycle.expiresAt,
+        startTime: lifecycle.startAt,
         lastMeaningfulUpdateAt: now,
         primaryLocation: candidate.locationText || null,
         locationSummary: candidate.locationText || null,
@@ -502,6 +713,11 @@ async function upsertCandidate(candidate, provider) {
         storyGraphEventIds: storyPeerEventId ? [storyPeerEventId, eventRef.id] : [eventRef.id],
         visibility: 'public',
         archived: false,
+        canonised: false,
+        socialLocked: false,
+        liveFeedEligible: lifecycle.lifecycleState !== 'Scheduled',
+        currentEventEligible: true,
+        recommendationEligible: true,
         moderationState: 'approved',
         createdByType: 'external_ingestion',
         createdBy: 'external_ingestion',
@@ -632,6 +848,22 @@ export const ingestGlobalEvents = onSchedule({ schedule: 'every 5 minutes', time
   await runGlobalEventsIngestion();
 });
 
+export const canoniseExpiredPortalEvents = onSchedule({ schedule: 'every 15 minutes', timeZone: 'Etc/UTC', maxInstances: 1 }, async () => {
+  const now = new Date();
+  const expired = await db.collection('events')
+    .where('archived', '==', false)
+    .where('expiresAt', '<=', now)
+    .limit(100)
+    .get();
+  let canonised = 0;
+  for (const eventDoc of expired.docs) {
+    const outcome = await canoniseEvent(eventDoc.ref, 'expiry_reached');
+    if (outcome?.canonised) canonised += 1;
+  }
+  logger.info('Historical canonisation sweep completed', { scanned: expired.size, canonised });
+  return { scanned: expired.size, canonised };
+});
+
 export const runGlobalEventsIngestionNow = onCall(async (request) => {
   const uid = requireAuth(request);
   if (request.auth.token.admin !== true && request.auth.token.custodian !== true) throw new HttpsError('permission-denied', 'Only Portal admins or Custodians can run ingestion manually.');
@@ -652,6 +884,7 @@ export const submitEventContribution = onCall(async (request) => {
   await db.runTransaction(async (transaction) => {
     const [eventSnapshot, profileSnapshot] = await Promise.all([transaction.get(eventRef), transaction.get(profileRef)]);
     if (!eventSnapshot.exists || !isEligibleForVortex(eventSnapshot.data())) throw new HttpsError('not-found', 'This Event is unavailable.');
+    if (isSocialLocked(eventSnapshot.data())) throw new HttpsError('failed-precondition', 'This Event is a historical record and no longer accepts new contributions.');
     const profile = profileSnapshot.data() || {};
     transaction.set(contributionRef, {
       eventId,
@@ -708,7 +941,7 @@ const ADMIN_ROLE_PERMISSIONS = {
   trust_safety: ['suspend_user', 'ban_user', 'restore_content', 'permanent_delete', 'quick_approve', 'quick_remove', 'quick_suspend', 'bulk_moderation', 'view_audit_logs', 'export_reports', 'restore_deleted_content', 'restore_suspended_users'],
   verification_team: ['approve_verification', 'remove_verification', 'request_documents', 'view_audit_logs', 'export_reports'],
   marketplace_team: ['transfer_handle', 'recover_handle', 'marketplace_reversal', 'refund_placeholder_purchase', 'view_audit_logs', 'export_reports', 'restore_handles'],
-  events_team: ['delete_event', 'feature_event', 'archive', 'feature', 'remove', 'merge_duplicate_events', 'split_merged_events', 'view_audit_logs', 'export_reports'],
+  events_team: ['delete_event', 'feature_event', 'archive', 'feature', 'remove', 'merge_duplicate_events', 'split_merged_events', 'historical_override', 'view_audit_logs', 'export_reports'],
   creator_team: ['large_creator_payout_approval', 'view_audit_logs', 'export_reports'],
   support: ['warn_user', 'force_logout', 'message_user', 'view_reports', 'view_audit_logs'],
   analytics: ['view_analytics', 'export_reports', 'view_audit_logs'],
@@ -760,6 +993,7 @@ const ACTION_PERMISSION = {
   delete_event: 'delete_event',
   feature_event: 'feature_event',
   feature: 'feature_event',
+  historical_override: 'historical_override',
   view_audit_history: 'view_audit_logs',
   export: 'export_reports',
   csv_export: 'export_reports',
@@ -1210,6 +1444,85 @@ export const executePortalAdminAction = onCall(async (request) => {
     transaction.set(idemRef, { adminUid, idempotencyKey, action, result: { ok: true, auditId: auditRef.id, timelineId: timelineRef.id, approvalId: sensitive ? approvalRef.id : null, approvalStatus }, createdAt: FieldValue.serverTimestamp() });
   });
   return { ok: true, auditId: auditRef.id, timelineId: timelineRef.id, approvalId: sensitive ? approvalRef.id : null, approvalStatus };
+});
+
+export const applyHistoricalOverride = onCall(async (request) => {
+  const adminUid = requireAdminPermission(request, 'historical_override');
+  const eventId = String(request.data?.eventId || '').trim();
+  const reason = String(request.data?.reason || '').trim();
+  const caseId = request.data?.caseId ? String(request.data.caseId).trim().slice(0, 120) : null;
+  const changes = sanitizeAdminInput(request.data?.changes || {});
+  if (!eventId) throw new HttpsError('invalid-argument', 'Choose an Event to correct.');
+  if (!reason || reason.length < 10) throw new HttpsError('invalid-argument', 'A verified correction reason is required.');
+  const allowedFields = new Set(['title', 'description', 'summary', 'category', 'tags', 'locationSummary', 'primaryLocation', 'coordinates', 'media', 'parentEventId', 'childEventIds', 'relatedEventIds', 'storyGraphEventIds', 'legalRedaction', 'redactionReason']);
+  const update = Object.fromEntries(Object.entries(changes).filter(([key]) => allowedFields.has(key)));
+  if (!Object.keys(update).length) throw new HttpsError('invalid-argument', 'Provide at least one approved historical field to correct.');
+  const eventRef = db.collection('events').doc(eventId);
+  const startedAt = new Date();
+  let auditId = null;
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(eventRef);
+    if (!snapshot.exists) throw new HttpsError('not-found', 'Event not found.');
+    const before = { id: eventId, ...snapshot.data() };
+    if (!isCanonised(before)) throw new HttpsError('failed-precondition', 'Historical override only applies after canonisation.');
+    const after = {
+      ...before,
+      ...update,
+      lifecycleState: 'Canonised',
+      canonised: true,
+      archived: true,
+      socialLocked: true,
+      historicalMetadata: archiveSearchMetadata({ ...before, ...update, id: eventId }, new Date()),
+      updatedAfterCanonisation: true,
+      lastHistoricalCorrectionAt: FieldValue.serverTimestamp(),
+      lastHistoricalCorrectionByUid: adminUid,
+      historicalCorrectionNotice: 'Historical Record',
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (ordinaryEditAllowed(before, after)) throw new HttpsError('invalid-argument', 'No locked historical fields changed.');
+    const auditRef = db.collection('auditLogs').doc();
+    auditId = auditRef.id;
+    transaction.set(eventRef, after, { merge: true });
+    transaction.set(db.collection('historicalEvents').doc(eventId), {
+      eventId,
+      title: after.title || '',
+      summary: after.summary || after.description || '',
+      category: after.category || after.eventType || 'Other',
+      parentEventId: after.parentEventId || null,
+      childEventIds: after.childEventIds || [],
+      relatedEventIds: after.relatedEventIds || [],
+      storyGraphEventIds: after.storyGraphEventIds || [eventId],
+      historicalMetadata: after.historicalMetadata,
+      permanentUrl: after.historicalMetadata.permanentUrl,
+      updatedAfterCanonisation: true,
+      lastHistoricalCorrectionAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    const endedAt = new Date();
+    transaction.set(auditRef, { ...overrideAuditPayload({ adminUid, eventId, reason, caseId, before, after, startedAt, endedAt }), auditId, createdAt: FieldValue.serverTimestamp() });
+    transaction.set(db.collection('eventStatusHistory').doc(), { eventId, status: 'Canonised', reason: 'historical_override_recanonised', actorType: 'platform_admin', actorUid: adminUid, caseId, createdAt: FieldValue.serverTimestamp() });
+    appendTimelineEntry(transaction, eventId, 'correction', `Historical correction applied: ${reason}`, { authorUid: adminUid, confidenceLabel: after.confidenceLabel || 'Confirmed' });
+  });
+  return { eventId, corrected: true, auditId };
+});
+
+export const updateEventLifecycleConfig = onCall(async (request) => {
+  const adminUid = requireAdminPermission(request, 'historical_override');
+  const durationsMs = sanitizeAdminInput(request.data?.durationsMs || {});
+  const minDurationMs = Number(request.data?.minDurationMs || 30 * 60 * 1000);
+  const maxDurationMs = Number(request.data?.maxDurationMs || 366 * 24 * 60 * 60 * 1000);
+  const validDurations = Object.fromEntries(Object.entries(durationsMs)
+    .map(([key, value]) => [String(key).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_'), Number(value)])
+    .filter(([key, value]) => key && Number.isFinite(value) && value >= 30 * 60 * 1000 && value <= maxDurationMs));
+  await db.collection('platformConfig').doc('eventLifecycle').set({
+    durationsMs: validDurations,
+    minDurationMs,
+    maxDurationMs,
+    updatedByUid: adminUid,
+    updatedAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
+  await db.collection('auditLogs').add({ system: 'portal_historical_canonisation', action: 'event_lifecycle_config_updated', actorUid: adminUid, durationsMs: validDurations, immutable: true, createdAt: FieldValue.serverTimestamp() });
+  return { updated: true, durationsMs: validDurations };
 });
 
 function adminDate(value) {

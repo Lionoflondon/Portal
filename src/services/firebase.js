@@ -181,62 +181,14 @@ export function observeEvent(eventId, callback, onError) {
 }
 
 export async function createPortalEvent(user, values) {
-  const eventStatus = values.status || (values.date || values.time ? 'Upcoming' : 'Live');
-  const startTime = values.date || values.time ? Timestamp.fromDate(new Date(`${values.date || new Date().toISOString().slice(0, 10)}T${values.time || '00:00'}`)) : serverTimestamp();
   const heroImageUrl = values.heroImageUrl ? validateHttpsUrl(values.heroImageUrl).toString() : '';
-  return addDoc(collection(requireService(portalDb, 'Firestore'), 'events'), {
-    title: values.title.trim(),
-    summary: (values.summary || values.description || '').trim(),
-    description: (values.description || values.summary || '').trim(),
-    status: eventStatus,
-    eventType: values.eventType || values.category || 'Other',
-    category: values.category || values.eventType || 'Other',
-    locationSummary: values.location || '',
-    primaryLocation: values.location || '',
-    heroImageUrl,
-    mediaPreview: heroImageUrl ? { url: heroImageUrl, type: 'image' } : null,
-    automaticGpsRequested: Boolean(values.automaticGps),
-    date: values.date || '',
-    time: values.time || '',
-    startTime,
-    visibility: values.visibility || 'public',
-    parentEventId: values.parentEventId || null,
-    archived: false,
-    moderationState: 'approved',
-    followerCount: 0,
-    updateCount: 1,
-    viewCount: 0,
-    shareCount: 0,
-    media: { photoCount: values.photoCount || (heroImageUrl ? 1 : 0), hasVideo: Boolean(values.videoCount) },
-    publishedAt: serverTimestamp(),
-    createdBy: user.uid,
-    authorUid: user.uid,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    lastMeaningfulUpdateAt: serverTimestamp(),
-  });
+  return callPortalIdentity('createPortalEvent', { ...values, heroImageUrl });
 }
 
 export function updatePortalEvent(eventId, values) {
   const heroImageUrl = values.heroImageUrl || values.heroImageUrl === '' ? values.heroImageUrl : values.existingHeroImageUrl || '';
   const safeHeroImageUrl = heroImageUrl ? validateHttpsUrl(heroImageUrl).toString() : '';
-  return updateDoc(doc(requireService(portalDb, 'Firestore'), 'events', eventId), {
-    title: values.title.trim(),
-    summary: (values.summary || values.description || '').trim(),
-    description: (values.description || values.summary || '').trim(),
-    status: values.status,
-    eventType: values.eventType || values.category || 'Other',
-    category: values.category || values.eventType || 'Other',
-    locationSummary: values.location || values.locationSummary || '',
-    primaryLocation: values.location || values.primaryLocation || '',
-    heroImageUrl: safeHeroImageUrl,
-    mediaPreview: safeHeroImageUrl ? { url: safeHeroImageUrl, type: 'image' } : values.mediaPreview || null,
-    date: values.date || '',
-    time: values.time || '',
-    visibility: values.visibility || 'public',
-    parentEventId: values.parentEventId || null,
-    updatedAt: serverTimestamp(),
-  });
+  return callPortalIdentity('updatePortalEvent', { ...values, eventId, heroImageUrl: safeHeroImageUrl });
 }
 
 export async function uploadPortalEventCover(user, draftId, file, onProgress) {
@@ -351,21 +303,15 @@ export async function publishPortalReport(user, values, onProgress) {
   const db = requireService(portalDb, 'Firestore');
   let eventId = values.eventId;
   if (!eventId) {
-    const event = await addDoc(collection(db, 'events'), {
+    const event = await callPortalIdentity('createPortalEvent', {
       title: values.eventTitle.trim(),
-      summary: values.description.trim(),
-      status: 'Developing',
-      parentEventId: null,
-      archived: false,
+      description: values.description.trim(),
+      eventType: values.sourceType || 'Report',
+      category: values.sourceType || 'Report',
+      location: values.location.trim() || '',
       visibility: 'public',
-      moderationState: 'approved',
-      publishedAt: serverTimestamp(),
-      createdBy: user.uid,
-      authorUid: user.uid,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
     });
-    eventId = event.id;
+    eventId = event.eventId || event.id;
   }
   const report = await addDoc(collection(db, 'events', eventId, 'reports'), {
     title: values.title.trim(),

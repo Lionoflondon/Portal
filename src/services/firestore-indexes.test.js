@@ -12,5 +12,13 @@ describe('Portal Events Firestore index', () => {
         { fieldPath: 'updatedAt', order: 'DESCENDING' },
       ],
     });
+    expect(config.indexes).toContainEqual({
+      collectionGroup: 'events',
+      queryScope: 'COLLECTION',
+      fields: [
+        { fieldPath: 'archived', order: 'ASCENDING' },
+        { fieldPath: 'expiresAt', order: 'ASCENDING' },
+      ],
+    });
   });
 });
