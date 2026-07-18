@@ -162,8 +162,8 @@ describe('Portal app shell', () => {
     expect(styles).toContain('.event-filter-scroll{display:flex;align-items:center;gap:7px;min-width:0;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap');
     expect(styles).toContain('.event-filter-scroll .chip{flex:0 0 auto;min-height:40px;white-space:nowrap}');
     expect(styles).toContain('.events-canvas .event-discovery-controls{display:grid;gap:9px;width:100%;padding:10px 0 12px');
-    expect(styles).toContain('grid-template-columns:repeat(var(--event-columns,4),minmax(0,1fr))');
-    expect(styles).toContain('.masonry-event-card{position:relative;display:block;width:100%;min-width:0');
+    expect(styles).toContain('.immersive-event-masonry{column-count:2;column-gap:28px;width:100%;max-width:none}');
+    expect(styles).toContain('.editorial-event-card{position:relative;display:inline-block;width:100%;height:clamp(320px,33vw,430px)');
   });
 
 
@@ -185,18 +185,16 @@ describe('Portal app shell', () => {
     expect(formBlock).toContain('Original discussion');
     expect(formBlock).toContain('Vortex may cluster related activity without merging ownership or attribution.');
     expect(formBlock).toContain("reach: 'Random'");
-    expect(source).toContain("const eventReaches = ['Random', 'Local', 'Citywide', 'National', 'Global']");
-    expect(source).toContain("const value = event.reach || event.reachClassification || 'Random'");
-    expect(source).toContain('function useEventMasonryColumns()');
-    expect(source).toContain("if (window.innerWidth < 680) return 1");
-    expect(source).toContain("if (window.innerWidth >= 2200) return 5");
-    expect(source).toContain('return 4;');
-    expect(source).toContain('candidate.weight < shortest.weight');
+    expect(source).toContain("const value = `${item.reach || item.reachClassification || ''}");
+    expect(source).toContain('Immersive masonry event story grid');
+    expect(source).toContain('editorial-event-card');
+    expect(source).toContain('event-gallery-preview');
     expect(styles).toContain('.events-canvas{position:relative;isolation:isolate;width:100%;max-width:none');
-    expect(styles).toContain('grid-template-columns:repeat(var(--event-columns,4),minmax(0,1fr))');
+    expect(styles).toContain('.immersive-event-masonry{column-count:2');
+    expect(styles).toContain('@media (min-width:1500px){.immersive-event-masonry{column-count:3}}');
     expect(styles).toContain('@media (max-width:679px)');
-    expect(styles).toContain('.event-masonry{grid-template-columns:1fr');
-    expect(styles).toContain('.masonry-event-card:hover{transform:translateY(-5px)');
+    expect(styles).toContain('.immersive-event-masonry{column-count:2;column-gap:12px}');
+    expect(styles).toContain('.editorial-event-card:hover{transform:translateY(-6px)');
   });
 
   it('keeps Events editorial and independent from social event tooling', () => {
@@ -215,7 +213,8 @@ describe('Portal app shell', () => {
     expect(eventCardBlock).not.toContain('Join Event');
     expect(eventCardBlock).not.toContain('Reserve Spot');
     expect(source).toContain('function canonicalEvents(events = [])');
-    expect(styles).toContain('.masonry-event-card.reach-global::before');
+    expect(styles).toContain('.event-accent-breaking');
+    expect(styles).toContain('.event-accent-technology');
   });
 
   it('keeps Events independent and moves clustering into Vortex story graphs', () => {
@@ -630,12 +629,12 @@ describe('Portal app shell', () => {
     expect(profileBlock).toContain("['Posts', 'Replies', 'Media']");
     expect(profileBlock).toContain('Share Profile');
     expect(eventCardBlock).toContain('masonry-event-card');
-    expect(eventCardBlock).toContain('event-media');
+    expect(eventCardBlock).toContain('editorial-event-media');
     expect(eventCardBlock).toContain('event-essential-meta');
     expect(eventCardBlock).toContain('event-card-summary');
     expect(eventCardBlock).not.toContain('interested');
     expect(eventCardBlock).not.toContain('following');
-    expect(eventCardBlock).not.toContain('Share');
+    expect(eventCardBlock).toContain('Share event');
     expect(eventCardBlock).not.toContain('event-mini-map');
     expect(vortexBlock).toContain('People');
     expect(vortexBlock).toContain('Handles');
@@ -701,7 +700,8 @@ describe('Portal app shell', () => {
     expect(timelineBlock).toContain("entry.entryType === 'Report'");
     expect(postMediaBlock).toContain('media-expand-button');
     expect(postMediaBlock).toContain('media-gallery');
-    expect(styles).toContain('.masonry-event-card{cursor:pointer}');
+    expect(styles).toContain('.editorial-event-card{position:relative;display:inline-block');
+    expect(styles).toContain('cursor:pointer');
     expect(styles).toContain('.report-detail-modal');
     expect(styles).toContain('.media-gallery-frame');
   });

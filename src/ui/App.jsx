@@ -168,7 +168,6 @@ export const EVENTS_UNAVAILABLE_MESSAGE = 'Events are temporarily unavailable. P
 export const PROFILE_HANDLE_PLACEHOLDER = 'Choose your unique handle';
 const eventRegions = ['World', 'Nearby', 'United Kingdom', 'Europe', 'Africa', 'Americas', 'Asia'];
 const eventCategories = ['All', ...eventTypes];
-const eventReaches = ['Random', 'Local', 'Citywide', 'National', 'Global'];
 const contributionTabs = ['Overview', 'Timeline', 'Updates', 'Photos', 'Videos', 'Discussion', 'Reports', 'Sources', 'Contributors', 'Related Events'];
 
 function Brand() { return <a href="#/" className="brand" aria-label="Portal home"><img className="brand-logo desktop-only" src="/brand/portal-logo-wide.png" alt="Portal" /><span className="brand-mark mobile-only"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="#fff" strokeWidth="2" strokeLinecap="round" /><circle cx="12" cy="12" r="4" stroke="#fff" strokeWidth="2" /></svg></span><span className="brand-name mobile-only">Portal</span></a>; }
@@ -184,10 +183,6 @@ function Section({ title, link, children }) { return <section><div className="se
 function Loading({ label = 'Loading Portal...' }) { return <div className="glass card empty-state"><div className="loader" /><p className="body-sm">{label}</p></div>; }
 function ErrorState({ message }) { return <div className="glass card empty-state"><h2 className="display-md">Portal could not load this</h2><p className="body-sm">{message}</p></div>; }
 
-function eventReach(event = {}) {
-  const value = event.reach || event.reachClassification || 'Random';
-  return eventReaches.includes(value) ? value : 'Random';
-}
 function eventPulse(event = {}) {
   return Math.max(0, Math.min(100, Number(event.pulseStrength ?? event.activityScore ?? 0)));
 }
@@ -206,26 +201,26 @@ function canonicalEvents(events = []) {
     return true;
   });
 }
-function eventCardWeight(event = {}) {
-  const mediaWeight = event.heroImageUrl || event.mediaPreview?.url || event.photos?.length ? 230 : 150;
-  return mediaWeight + Math.min(150, String(event.summary || '').length * .45) + Math.min(70, String(event.title || '').length * .5);
+function eventAccent(event = {}) {
+  const type = String(event.eventType || event.category || '').toLowerCase();
+  if (type.includes('breaking') || type.includes('incident')) return 'breaking';
+  if (type.includes('sport')) return 'sport';
+  if (type.includes('entertainment') || type.includes('arts') || type.includes('culture')) return 'culture';
+  if (type.includes('government') || type.includes('politic')) return 'government';
+  if (type.includes('community')) return 'community';
+  if (type.includes('travel') || type.includes('transport')) return 'travel';
+  if (type.includes('technology') || type.includes('science')) return 'technology';
+  if (type.includes('business')) return 'business';
+  if (type.includes('weather') || type.includes('environment')) return 'weather';
+  return 'world';
 }
-function useEventMasonryColumns() {
-  const getCount = () => {
-    if (typeof window === 'undefined') return 4;
-    if (window.innerWidth < 680) return 1;
-    if (window.innerWidth < 980) return 2;
-    if (window.innerWidth < 1320) return 3;
-    if (window.innerWidth >= 2200) return 5;
-    return 4;
-  };
-  const [count, setCount] = useState(getCount);
-  useEffect(() => {
-    const resize = () => setCount(getCount());
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, []);
-  return count;
+function eventMediaItems(event = {}) {
+  const items = [];
+  if (event.heroImageUrl) items.push({ url: event.heroImageUrl, kind: 'image', alt: event.title });
+  if (event.mediaPreview?.url && !items.some((item) => item.url === event.mediaPreview.url)) items.push({ url: event.mediaPreview.url, kind: event.mediaPreview.type || 'image', alt: event.title });
+  if (Array.isArray(event.photos)) event.photos.forEach((photo) => { const url = photo?.url || photo; if (url && !items.some((item) => item.url === url)) items.push({ ...(typeof photo === 'object' ? photo : {}), url, kind: 'image', alt: event.title }); });
+  if (event.video?.thumbnailUrl && !items.some((item) => item.url === event.video.thumbnailUrl)) items.push({ url: event.video.thumbnailUrl, kind: 'image', alt: event.title });
+  return items;
 }
 function editorialEventStatus(event = {}) {
   const state = String(event.lifecycleState || event.status || '').toLowerCase();
@@ -237,24 +232,24 @@ function editorialEventStatus(event = {}) {
 function EventCard({ event }) {
   const location = event.locationSummary || event.primaryLocation || event.venue || event.region || 'World';
   const status = editorialEventStatus(event);
-  const hero = event.heroImageUrl || event.mediaPreview?.url || event.photos?.[0]?.url || '';
-  const reach = eventReach(event); const timing = eventTimeParts(event);
+  const media = eventMediaItems(event);
+  const hero = media[0];
+  const extraMediaCount = Math.max(0, media.length - 3);
+  const accent = eventAccent(event); const timing = eventTimeParts(event);
+  const source = event.sourceName || event.providerName || event.createdByType || event.sourceRecords?.[0]?.sourceName || 'Portal';
+  const mediaCount = Number(event.mediaCount || media.length || 0);
+  const commentCount = Number(event.commentCount || event.replyCount || event.reportCount || 0);
+  const reactionCount = Number(event.reactionCount || event.likeCount || event.echoCount || 0);
   const open = () => { window.location.hash = `#/events/${event.id}`; };
   const keyOpen = (item) => { if (item.key === 'Enter' || item.key === ' ') { item.preventDefault(); open(); } };
-  return <article className={`glass interactive event-card masonry-event-card reach-${reach.toLowerCase()} event-variant-${String(event.id || '').charCodeAt(0) % 4 || 0}`} role="link" tabIndex="0" onClick={open} onKeyDown={keyOpen} aria-label={`Open ${event.title}`}><a className="event-media" href={`#/events/${event.id}`} aria-label={event.title}>{hero ? <PortalMedia asset={{ url: hero, kind: 'image', alt: event.title }} alt={event.title} fallbackLabel="Event media unavailable" /> : <UnavailableMedia label="Media unavailable" detail="No trusted media is available for this Event yet." />}{event.video?.thumbnailUrl ? <span className="source-chip">Video</span> : null}</a><div className="masonry-event-content"><div className="event-card-topline"><span className="event-sector">{event.eventType || event.category || 'World'}</span><span className={`event-status ${status.toLowerCase()}`}>{status}</span></div><a href={`#/events/${event.id}`}><strong>{event.title}</strong></a>{event.summary ? <p className="body-sm event-card-summary">{event.summary}</p> : null}<div className="event-essential-meta"><span>{location}</span><span>{timing.started}</span></div></div></article>;
+  return <article className={`glass interactive event-card masonry-event-card editorial-event-card event-accent-${accent}`} role="link" tabIndex="0" onClick={open} onKeyDown={keyOpen} aria-label={`Open ${event.title}`}><a className="editorial-event-media" href={`#/events/${event.id}`} aria-label={event.title}>{hero ? <PortalMedia asset={hero} alt={event.title} fallbackLabel="Event media unavailable" /> : <UnavailableMedia label="Media unavailable" detail="No trusted media is available for this Event yet." />}{event.video?.thumbnailUrl ? <span className="event-play-button" aria-label="Video available">▶</span> : null}{event.video?.duration ? <span className="event-media-duration">{event.video.duration}</span> : null}{event.liveStreamUrl ? <span className="event-live-indicator">Live</span> : null}{media.length > 1 ? <div className="event-gallery-preview" aria-label={`${media.length} media items`}>{media.slice(1, 3).map((item, index) => <PortalMedia key={`${item.url}-${index}`} asset={item} alt="" fallbackLabel="Preview unavailable" />)}{extraMediaCount ? <span>+{extraMediaCount}</span> : null}</div> : null}</a><div className="editorial-event-overlay"><div className="event-card-topline"><span className="event-sector">{event.eventType || event.category || 'World'}</span><span className={`event-status ${status.toLowerCase()}`}>{status}</span>{event.verificationState === 'verified' || event.confidenceLabel === 'Confirmed' ? <span className="event-verified">Verified</span> : null}</div><a href={`#/events/${event.id}`}><strong>{event.title}</strong></a>{event.summary ? <p className="body-sm event-card-summary">{event.summary}</p> : null}<div className="event-essential-meta"><span>{location}</span><span>{timing.started}</span><span>{source}</span></div><div className="event-overlay-actions" aria-label="Event story metadata"><span>{mediaCount} media</span><span>{commentCount} comments</span><span>{reactionCount} reactions</span><button type="button" aria-label="Bookmark event" onClick={(item) => item.stopPropagation()}>⌑</button><button type="button" aria-label="Share event" onClick={(item) => { item.stopPropagation(); navigator.share ? navigator.share({ title: event.title, url: `${window.location.origin}/#/events/${event.id}` }).catch(() => {}) : navigator.clipboard?.writeText(`${window.location.origin}/#/events/${event.id}`).catch(() => {}); }}>↗</button></div></div></article>;
 }
 
 function EventCollection({ events, loading, error, empty, emptyDetail, onRefresh }) {
-  const columnCount = useEventMasonryColumns();
-  if (loading) return <div className="event-masonry skeleton-masonry">{Array.from({ length: 8 }).map((_, index) => <div className="glass card event-skeleton" key={index} />)}</div>;
+  if (loading) return <div className="event-masonry immersive-event-masonry skeleton-masonry">{Array.from({ length: 6 }).map((_, index) => <div className="glass card event-skeleton editorial-event-skeleton" key={index} />)}</div>;
   if (error) return <ErrorState message={error} />;
-  const columns = Array.from({ length: columnCount }, () => ({ weight: 0, events: [] }));
-  canonicalEvents(events).forEach((event) => {
-    const column = columns.reduce((shortest, candidate) => candidate.weight < shortest.weight ? candidate : shortest, columns[0]);
-    column.events.push(event); column.weight += eventCardWeight(event) + 20;
-  });
   if (!events.length) return <div className="glass card empty-state events-empty-state"><div className="icon-wrap"><Icon name="events" /></div><h2 className="display-md">{empty}</h2><p className="body-sm">{emptyDetail}</p>{onRefresh ? <button className="btn btn-secondary btn-sm" type="button" onClick={onRefresh}>Refresh</button> : null}</div>;
-  return <div className="event-masonry" style={{ '--event-columns': columnCount }} aria-label="Masonry event discovery grid">{columns.map((column, index) => <div className="event-masonry-column" key={`event-column-${index}`}>{column.events.map((event) => <EventCard key={event.id} event={event} />)}</div>)}</div>;
+  return <div className="event-masonry immersive-event-masonry" aria-label="Immersive masonry event story grid">{canonicalEvents(events).map((event) => <EventCard key={event.id} event={event} />)}</div>;
 }
 
 function PostMedia({ post }) {
