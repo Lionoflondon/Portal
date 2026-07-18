@@ -131,7 +131,7 @@ describe('Portal app shell', () => {
     expect(homeBlock).not.toContain('Events happening now');
     expect(homeBlock).not.toContain('EventCollection');
     expect(eventsBlock).toContain('What is happening?');
-    expect(eventsBlock).toContain("['Nearby', 'Live', 'Breaking', 'Today', 'Upcoming', 'Following', 'Trending', 'Archived']");
+    expect(eventsBlock).toContain("['World', 'Live', 'Upcoming', 'Complete', 'Today']");
     expect(eventsBlock).toContain('EventCollection');
   });
 
@@ -199,21 +199,21 @@ describe('Portal app shell', () => {
     expect(styles).toContain('.masonry-event-card:hover{transform:translateY(-5px)');
   });
 
-  it('keeps Events reach, status and public intelligence distinct', () => {
+  it('keeps Events editorial and independent from social event tooling', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const styles = readFileSync(resolve('src/styles.css'), 'utf8');
     const eventCardBlock = source.match(/function EventCard\([\s\S]*?\n}\n\nfunction EventCollection/)?.[0] || '';
     const eventsBlock = source.match(/function Events\([\s\S]*?\n}\n\nfunction EventDetail/)?.[0] || '';
     expect(source).not.toContain('LIVE LEDGER');
-    expect(eventsBlock).toContain('Create event');
+    expect(eventsBlock).toContain('Portal Events is a living window into significant happenings across the world.');
     expect(eventCardBlock).toContain('event-status');
-    expect(eventCardBlock).toContain('event-reach');
-    expect(eventCardBlock).toContain('Pulse Strength');
+    expect(eventCardBlock).toContain('event-sector');
+    expect(eventCardBlock).toContain('event-card-summary');
     expect(eventCardBlock).not.toContain('AI confidence');
-    expect(eventCardBlock).toContain('Updated {timing.updated}');
-    expect(eventCardBlock).toContain('Started {timing.started}');
-    expect(eventCardBlock).toContain('reports');
-    expect(eventCardBlock).toContain('contributors');
+    expect(eventCardBlock).not.toContain('interested');
+    expect(eventCardBlock).not.toContain('following');
+    expect(eventCardBlock).not.toContain('Join Event');
+    expect(eventCardBlock).not.toContain('Reserve Spot');
     expect(source).toContain('function canonicalEvents(events = [])');
     expect(styles).toContain('.masonry-event-card.reach-global::before');
   });
@@ -226,9 +226,10 @@ describe('Portal app shell', () => {
     const vortexEntryBlock = source.match(/function storyEventIds\([\s\S]*?\n}\n\nfunction HandleMarketplace/)?.[0] || '';
     expect(engine).toContain("action: 'cluster_story'");
     expect(engine).not.toContain("action: 'attach'");
-    expect(eventDetailBlock).toContain('This Event remains independent.');
-    expect(eventDetailBlock).toContain('Original creator, timestamp, media, comments and URL stay attached to this Event.');
-    expect(eventDetailBlock).toContain('Clustered in Vortex, not merged.');
+    expect(eventDetailBlock).toContain('Event Story');
+    expect(eventDetailBlock).toContain('Interactive map');
+    expect(eventDetailBlock).toContain('Why this matters');
+    expect(eventDetailBlock).toContain('Trusted references');
     expect(vortexEntryBlock).toContain('function storyEventIds(entry = {})');
     expect(vortexEntryBlock).toContain('Story graph');
     expect(vortexEntryBlock).toContain('Pulse Strength');
@@ -631,9 +632,10 @@ describe('Portal app shell', () => {
     expect(eventCardBlock).toContain('masonry-event-card');
     expect(eventCardBlock).toContain('event-media');
     expect(eventCardBlock).toContain('event-essential-meta');
-    expect(eventCardBlock).toContain('interested');
-    expect(eventCardBlock).toContain('following');
-    expect(eventCardBlock).toContain('Share');
+    expect(eventCardBlock).toContain('event-card-summary');
+    expect(eventCardBlock).not.toContain('interested');
+    expect(eventCardBlock).not.toContain('following');
+    expect(eventCardBlock).not.toContain('Share');
     expect(eventCardBlock).not.toContain('event-mini-map');
     expect(vortexBlock).toContain('People');
     expect(vortexBlock).toContain('Handles');
@@ -684,15 +686,15 @@ describe('Portal app shell', () => {
     expect(eventCardBlock).toContain('role="link"');
     expect(eventCardBlock).toContain('tabIndex="0"');
     expect(eventCardBlock).toContain("window.location.hash = `#/events/${event.id}`");
-    expect(eventCardBlock).toContain('item.stopPropagation(); onFollow?.');
-    expect(eventCardBlock).toContain('item.stopPropagation(); navigator.clipboard');
+    expect(eventCardBlock).not.toContain('item.stopPropagation(); onFollow?.');
+    expect(eventCardBlock).not.toContain('item.stopPropagation(); navigator.clipboard');
     expect(eventDetailBlock).toContain('event-detail-hero');
     expect(eventDetailBlock).toContain('Pulse Strength {pulse}');
-    expect(eventDetailBlock).toContain('Author {eventAuthor}');
-    expect(eventDetailBlock).toContain('Copy link');
-    expect(eventDetailBlock).toContain('Support');
+    expect(eventDetailBlock).toContain('Full article');
+    expect(eventDetailBlock).toContain('Interactive map');
+    expect(eventDetailBlock).toContain('Why this matters');
+    expect(eventDetailBlock).toContain('Trusted references');
     expect(eventDetailBlock).toContain('setSelectedReport(item)');
-    expect(eventDetailBlock).toContain('report-detail-card');
     expect(reportDetailBlock).toContain('Report detail');
     expect(reportDetailBlock).toContain('report-detail-modal');
     expect(timelineBlock).toContain('report-timeline-button');
