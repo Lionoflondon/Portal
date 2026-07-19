@@ -131,7 +131,7 @@ describe('Portal app shell', () => {
     expect(homeBlock).not.toContain('Events happening now');
     expect(homeBlock).not.toContain('EventCollection');
     expect(eventsBlock).toContain('What is happening?');
-    expect(eventsBlock).toContain("['World', 'Live', 'Upcoming', 'Complete', 'Today']");
+    expect(eventsBlock).toContain("['All', 'Business', 'Music', 'Sport', 'Food', 'Nightlife', 'Education', 'Community', 'Health', 'Technology', 'Nearby', 'Today', 'This Week', 'Free', 'Premium']");
     expect(eventsBlock).toContain('EventCollection');
   });
 
@@ -145,25 +145,22 @@ describe('Portal app shell', () => {
     expect(collectionBlock).not.toContain('placeholder');
   });
 
-  it('keeps Events filters compact without changing masonry card scale', () => {
+  it('keeps Events search and filters compact above editorial masonry', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
     const styles = readFileSync(resolve('src/styles.css'), 'utf8');
     const eventsBlock = source.match(/function Events\([\s\S]*?\n}\n\nfunction EventDetail/)?.[0] || '';
+    expect(eventsBlock).toContain('event-search-panel');
+    expect(eventsBlock).toContain('Search events');
     expect(eventsBlock).toContain('event-filter-primary');
     expect(eventsBlock).toContain('event-filter-status');
-    expect(eventsBlock).toContain('event-filter-region');
-    expect(eventsBlock).toContain('event-filter-sector');
     expect(eventsBlock).toContain('event-filter-scroll');
-    expect(eventsBlock).toContain('onClick={() => setFilter(item)}');
-    expect(eventsBlock).toContain('onClick={() => setRegion(item)}');
-    expect(eventsBlock).toContain('onClick={() => setCategory(item)}');
-    expect(styles).toContain('.event-filter-primary{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr)');
-    expect(styles).toContain('.event-filter-sector{display:flex;align-items:center;gap:10px');
-    expect(styles).toContain('.event-filter-scroll{display:flex;align-items:center;gap:7px;min-width:0;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap');
-    expect(styles).toContain('.event-filter-scroll .chip{flex:0 0 auto;min-height:40px;white-space:nowrap}');
-    expect(styles).toContain('.events-canvas .event-discovery-controls{display:grid;gap:9px;width:100%;padding:10px 0 12px');
-    expect(styles).toContain('.immersive-event-masonry{column-count:2;column-gap:28px;width:100%;max-width:none}');
-    expect(styles).toContain('.editorial-event-card{position:relative;display:inline-block;width:100%;height:clamp(320px,33vw,430px)');
+    expect(eventsBlock).toContain("setFilter('World'); setCategory('All'); setRegion('World');");
+    expect(eventsBlock).toContain("setRegion('Nearby')");
+    expect(eventsBlock).toContain('setCategory(item)');
+    expect(styles).toContain('.event-search-panel{position:sticky;top:14px');
+    expect(styles).toContain('.event-filter-scroll{display:flex;align-items:center;gap:8px;min-width:0;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap');
+    expect(styles).toContain('.immersive-event-masonry{column-count:4;column-gap:18px;width:100%;max-width:none}');
+    expect(styles).toContain('.editorial-event-card{position:relative;display:inline-block;width:100%;aspect-ratio:4/5');
   });
 
 
@@ -188,33 +185,35 @@ describe('Portal app shell', () => {
     expect(source).toContain("const value = `${item.reach || item.reachClassification || ''}");
     expect(source).toContain('Immersive masonry event story grid');
     expect(source).toContain('editorial-event-card');
-    expect(source).toContain('event-gallery-preview');
+    expect(source).toContain('function eventImageRatio(event = {})');
+    expect(source).toContain("['4-5', '2-3', '16-9', '1-1'");
     expect(styles).toContain('.events-canvas{position:relative;isolation:isolate;width:100%;max-width:none');
-    expect(styles).toContain('.immersive-event-masonry{column-count:2');
-    expect(styles).toContain('@media (min-width:1500px){.immersive-event-masonry{column-count:3}}');
+    expect(styles).toContain('.immersive-event-masonry{column-count:4');
+    expect(styles).toContain('@media (min-width:1500px){.immersive-event-masonry{column-count:5}}');
+    expect(styles).toContain('@media (min-width:1900px){.immersive-event-masonry{column-count:6}}');
     expect(styles).toContain('@media (max-width:679px)');
     expect(styles).toContain('.immersive-event-masonry{column-count:2;column-gap:12px}');
-    expect(styles).toContain('.editorial-event-card:hover{transform:translateY(-6px)');
+    expect(styles).toContain('.editorial-event-card:hover,.editorial-event-card:focus-visible{transform:translateY(-5px) scale(1.02)');
   });
 
   it('keeps Events editorial and independent from social event tooling', () => {
     const source = readFileSync(resolve('src/ui/App.jsx'), 'utf8');
-    const styles = readFileSync(resolve('src/styles.css'), 'utf8');
     const eventCardBlock = source.match(/function EventCard\([\s\S]*?\n}\n\nfunction EventCollection/)?.[0] || '';
     const eventsBlock = source.match(/function Events\([\s\S]*?\n}\n\nfunction EventDetail/)?.[0] || '';
     expect(source).not.toContain('LIVE LEDGER');
     expect(eventsBlock).toContain('Portal Events is a living window into significant happenings across the world.');
     expect(eventCardBlock).toContain('event-status');
     expect(eventCardBlock).toContain('event-sector');
-    expect(eventCardBlock).toContain('event-card-summary');
+    expect(eventCardBlock).not.toContain('event-card-summary');
+    expect(eventCardBlock).not.toContain('event-overlay-actions');
     expect(eventCardBlock).not.toContain('AI confidence');
     expect(eventCardBlock).not.toContain('interested');
     expect(eventCardBlock).not.toContain('following');
     expect(eventCardBlock).not.toContain('Join Event');
     expect(eventCardBlock).not.toContain('Reserve Spot');
     expect(source).toContain('function canonicalEvents(events = [])');
-    expect(styles).toContain('.event-accent-breaking');
-    expect(styles).toContain('.event-accent-technology');
+    expect(source).toContain('function eventAccent(event = {})');
+    expect(eventCardBlock).toContain('event-accent-${accent}');
   });
 
   it('keeps Events independent and moves clustering into Vortex story graphs', () => {
@@ -631,10 +630,11 @@ describe('Portal app shell', () => {
     expect(eventCardBlock).toContain('masonry-event-card');
     expect(eventCardBlock).toContain('editorial-event-media');
     expect(eventCardBlock).toContain('event-essential-meta');
-    expect(eventCardBlock).toContain('event-card-summary');
+    expect(eventCardBlock).toContain('ratio-${ratio}');
+    expect(eventCardBlock).not.toContain('event-card-summary');
     expect(eventCardBlock).not.toContain('interested');
     expect(eventCardBlock).not.toContain('following');
-    expect(eventCardBlock).toContain('Share event');
+    expect(eventCardBlock).not.toContain('Share event');
     expect(eventCardBlock).not.toContain('event-mini-map');
     expect(vortexBlock).toContain('People');
     expect(vortexBlock).toContain('Handles');

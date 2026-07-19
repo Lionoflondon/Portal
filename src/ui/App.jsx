@@ -166,8 +166,6 @@ const handleLifecycleSteps = ['Request', 'Payment', 'Safety review', 'Identity c
 
 export const EVENTS_UNAVAILABLE_MESSAGE = 'Events are temporarily unavailable. Please try again shortly.';
 export const PROFILE_HANDLE_PLACEHOLDER = 'Choose your unique handle';
-const eventRegions = ['World', 'Nearby', 'United Kingdom', 'Europe', 'Africa', 'Americas', 'Asia'];
-const eventCategories = ['All', ...eventTypes];
 const contributionTabs = ['Overview', 'Timeline', 'Updates', 'Photos', 'Videos', 'Discussion', 'Reports', 'Sources', 'Contributors', 'Related Events'];
 
 function Brand() { return <a href="#/" className="brand" aria-label="Portal home"><img className="brand-logo desktop-only" src="/brand/portal-logo-wide.png" alt="Portal" /><span className="brand-mark mobile-only"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2v20M2 12h20" stroke="#fff" strokeWidth="2" strokeLinecap="round" /><circle cx="12" cy="12" r="4" stroke="#fff" strokeWidth="2" /></svg></span><span className="brand-name mobile-only">Portal</span></a>; }
@@ -222,6 +220,12 @@ function eventMediaItems(event = {}) {
   if (event.video?.thumbnailUrl && !items.some((item) => item.url === event.video.thumbnailUrl)) items.push({ url: event.video.thumbnailUrl, kind: 'image', alt: event.title });
   return items;
 }
+function eventImageRatio(event = {}) {
+  const raw = String(event.imageRatio || event.mediaRatio || event.heroRatio || '').replace(':', '-');
+  if (['4-5', '2-3', '16-9', '1-1'].includes(raw)) return raw;
+  const seed = String(event.id || event.title || '').split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return ['4-5', '2-3', '16-9', '1-1', '2-3', '4-5'][seed % 6];
+}
 function editorialEventStatus(event = {}) {
   const state = String(event.lifecycleState || event.status || '').toLowerCase();
   if (event.archived || event.canonised || ['archived', 'historic', 'resolved', 'complete', 'completed', 'canonised'].includes(state)) return 'Complete';
@@ -234,19 +238,15 @@ function EventCard({ event }) {
   const status = editorialEventStatus(event);
   const media = eventMediaItems(event);
   const hero = media[0];
-  const extraMediaCount = Math.max(0, media.length - 3);
-  const accent = eventAccent(event); const timing = eventTimeParts(event);
-  const source = event.sourceName || event.providerName || event.createdByType || event.sourceRecords?.[0]?.sourceName || 'Portal';
-  const mediaCount = Number(event.mediaCount || media.length || 0);
-  const commentCount = Number(event.commentCount || event.replyCount || event.reportCount || 0);
-  const reactionCount = Number(event.reactionCount || event.likeCount || event.echoCount || 0);
+  const accent = eventAccent(event); const timing = eventTimeParts(event); const ratio = eventImageRatio(event);
+  const footer = [location, timing.started, event.category || event.eventType].filter(Boolean).slice(0, 3);
   const open = () => { window.location.hash = `#/events/${event.id}`; };
   const keyOpen = (item) => { if (item.key === 'Enter' || item.key === ' ') { item.preventDefault(); open(); } };
-  return <article className={`glass interactive event-card masonry-event-card editorial-event-card event-accent-${accent}`} role="link" tabIndex="0" onClick={open} onKeyDown={keyOpen} aria-label={`Open ${event.title}`}><a className="editorial-event-media" href={`#/events/${event.id}`} aria-label={event.title}>{hero ? <PortalMedia asset={hero} alt={event.title} fallbackLabel="Event media unavailable" /> : <UnavailableMedia label="Media unavailable" detail="No trusted media is available for this Event yet." />}{event.video?.thumbnailUrl ? <span className="event-play-button" aria-label="Video available">▶</span> : null}{event.video?.duration ? <span className="event-media-duration">{event.video.duration}</span> : null}{event.liveStreamUrl ? <span className="event-live-indicator">Live</span> : null}{media.length > 1 ? <div className="event-gallery-preview" aria-label={`${media.length} media items`}>{media.slice(1, 3).map((item, index) => <PortalMedia key={`${item.url}-${index}`} asset={item} alt="" fallbackLabel="Preview unavailable" />)}{extraMediaCount ? <span>+{extraMediaCount}</span> : null}</div> : null}</a><div className="editorial-event-overlay"><div className="event-card-topline"><span className="event-sector">{event.eventType || event.category || 'World'}</span><span className={`event-status ${status.toLowerCase()}`}>{status}</span>{event.verificationState === 'verified' || event.confidenceLabel === 'Confirmed' ? <span className="event-verified">Verified</span> : null}</div><a href={`#/events/${event.id}`}><strong>{event.title}</strong></a>{event.summary ? <p className="body-sm event-card-summary">{event.summary}</p> : null}<div className="event-essential-meta"><span>{location}</span><span>{timing.started}</span><span>{source}</span></div><div className="event-overlay-actions" aria-label="Event story metadata"><span>{mediaCount} media</span><span>{commentCount} comments</span><span>{reactionCount} reactions</span><button type="button" aria-label="Bookmark event" onClick={(item) => item.stopPropagation()}>⌑</button><button type="button" aria-label="Share event" onClick={(item) => { item.stopPropagation(); navigator.share ? navigator.share({ title: event.title, url: `${window.location.origin}/#/events/${event.id}` }).catch(() => {}) : navigator.clipboard?.writeText(`${window.location.origin}/#/events/${event.id}`).catch(() => {}); }}>↗</button></div></div></article>;
+  return <article className={`interactive event-card masonry-event-card editorial-event-card event-accent-${accent} ratio-${ratio}`} role="link" tabIndex="0" onClick={open} onKeyDown={keyOpen} aria-label={`Open ${event.title}`}><a className="editorial-event-media" href={`#/events/${event.id}`} aria-label={event.title}>{hero ? <PortalMedia asset={hero} alt={event.title} fallbackLabel="Event media unavailable" /> : <UnavailableMedia label="Media unavailable" detail="No trusted media is available for this Event yet." />}{event.video?.thumbnailUrl ? <span className="event-play-button" aria-label="Video available">▶</span> : null}</a><div className="editorial-event-overlay"><div className="event-card-topline"><span className="event-sector">{event.eventType || event.category || 'World'}</span><span className={`event-status ${status.toLowerCase()}`}>{status}</span></div><a href={`#/events/${event.id}`}><strong>{event.title}</strong></a><div className="event-essential-meta">{footer.map((item) => <span key={item}>{item}</span>)}</div></div></article>;
 }
 
 function EventCollection({ events, loading, error, empty, emptyDetail, onRefresh }) {
-  if (loading) return <div className="event-masonry immersive-event-masonry skeleton-masonry">{Array.from({ length: 6 }).map((_, index) => <div className="glass card event-skeleton editorial-event-skeleton" key={index} />)}</div>;
+  if (loading) return <div className="event-masonry immersive-event-masonry skeleton-masonry">{Array.from({ length: 12 }).map((_, index) => <div className={`event-skeleton editorial-event-skeleton ratio-${['4-5', '2-3', '16-9', '1-1'][index % 4]}`} key={index} />)}</div>;
   if (error) return <ErrorState message={error} />;
   if (!events.length) return <div className="glass card empty-state events-empty-state"><div className="icon-wrap"><Icon name="events" /></div><h2 className="display-md">{empty}</h2><p className="body-sm">{emptyDetail}</p>{onRefresh ? <button className="btn btn-secondary btn-sm" type="button" onClick={onRefresh}>Refresh</button> : null}</div>;
   return <div className="event-masonry immersive-event-masonry" aria-label="Immersive masonry event story grid">{canonicalEvents(events).map((event) => <EventCard key={event.id} event={event} />)}</div>;
@@ -430,8 +430,13 @@ function EventForm({ initial, events, onSubmit, onCancel, busy, user }) {
 
 function Events({ eventState }) {
   const [filter, setFilter] = useState('World'); const [region, setRegion] = useState('World'); const [category, setCategory] = useState('All');
+  const [query, setQuery] = useState('');
   const now = Date.now();
-  const filtered = eventState.events.filter((event) => region === 'World' || event.region === region || event.country === region || event.geographicScope === region || event.locationSummary === region).filter((event) => category === 'All' || event.category === category || event.eventType === category).filter((event) => {
+  const searchValue = query.trim().toLowerCase();
+  const filtered = eventState.events.filter((event) => {
+    if (!searchValue) return true;
+    return [event.title, event.summary, event.description, event.locationSummary, event.primaryLocation, event.region, event.country, event.category, event.eventType].filter(Boolean).join(' ').toLowerCase().includes(searchValue);
+  }).filter((event) => region === 'World' || event.region === region || event.country === region || event.geographicScope === region || event.locationSummary === region).filter((event) => category === 'All' || event.category === category || event.eventType === category).filter((event) => {
     const status = editorialEventStatus(event);
     if (filter === 'World') return true;
     if (filter === 'Live') return status === 'Live';
@@ -440,7 +445,7 @@ function Events({ eventState }) {
     if (filter === 'Today') { const time = event.startTime?.toDate ? event.startTime.toDate().getTime() : event.createdAt?.toDate ? event.createdAt.toDate().getTime() : now; return Math.abs(now - time) < 24 * 60 * 60_000; }
     return true;
   });
-  return <div className="page events-page events-canvas"><div className="events-atmosphere" aria-hidden="true" /><div className="welcome-head events-heading"><div><h1 className="display-xl">What is happening?</h1><p className="body-md">Portal Events is a living window into significant happenings across the world.</p></div></div><div className="event-discovery-controls"><div className="glass event-filter-panel event-filter-primary"><div className="event-filter-group event-filter-status"><span className="eyebrow">Discovery</span><div className="chip-row event-filter-scroll">{['World', 'Live', 'Upcoming', 'Complete', 'Today'].map((item) => <button type="button" className={`chip ${filter === item ? 'active' : ''}`} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div></div><div className="event-filter-group event-filter-region"><span className="eyebrow">Regions, countries and cities</span><div className="chip-row event-filter-scroll">{eventRegions.map((item) => <button type="button" className={`chip ${region === item ? 'active' : ''}`} onClick={() => setRegion(item)} key={item}>{item}</button>)}</div></div></div><div className="glass event-filter-panel event-filter-sector"><span className="eyebrow">Topics</span><div className="chip-row event-filter-scroll">{eventCategories.map((item) => <button type="button" className={`chip ${category === item ? 'active' : ''}`} onClick={() => setCategory(item)} key={item}>{item}</button>)}</div><span className="event-filter-chevron" aria-hidden="true">›</span></div></div><Section title="Latest stories"><EventCollection events={filtered} loading={eventState.loading} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="No live events available." emptyDetail="Events will appear as trusted sources become available." onRefresh={() => window.location.reload()} /></Section></div>;
+  return <div className="page events-page events-canvas"><div className="events-atmosphere" aria-hidden="true" /><div className="welcome-head events-heading"><div><h1 className="display-xl">What is happening?</h1><p className="body-md">Portal Events is a living window into significant happenings across the world.</p></div></div><div className="glass event-search-panel"><label className="sr-only" htmlFor="eventSearch">Search events</label><input id="eventSearch" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search events" /></div><div className="event-discovery-controls"><div className="event-filter-panel event-filter-primary"><div className="event-filter-group event-filter-status"><div className="chip-row event-filter-scroll">{['All', 'Business', 'Music', 'Sport', 'Food', 'Nightlife', 'Education', 'Community', 'Health', 'Technology', 'Nearby', 'Today', 'This Week', 'Free', 'Premium'].map((item) => <button type="button" className={`chip ${filter === item || category === item || region === item || item === 'All' && filter === 'World' && category === 'All' && region === 'World' ? 'active' : ''}`} onClick={() => { if (item === 'All') { setFilter('World'); setCategory('All'); setRegion('World'); } else if (['Today', 'This Week'].includes(item)) setFilter(item); else if (item === 'Nearby') setRegion('Nearby'); else setCategory(item); }} key={item}>{item}</button>)}</div></div></div></div><Section title="Latest stories"><EventCollection events={filtered} loading={eventState.loading} error={eventState.error ? EVENTS_UNAVAILABLE_MESSAGE : ''} empty="No live events available." emptyDetail="Events will appear as trusted sources become available." onRefresh={() => window.location.reload()} /></Section></div>;
 }
 
 function EventDetail({ eventId, events }) {
